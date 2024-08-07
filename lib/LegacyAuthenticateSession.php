@@ -51,6 +51,12 @@ class LegacyAuthenticateSession
             $this->authenticationService->logout($sessionEntity);
         }
 
+        $login_token = $_POST['_token'] ?? '';
+        if (isset($_POST['authenticate']) && !$this->csrfTokenService->validateToken($login_token, 'login_token')) {
+            $sessionEntity = new SessionEntity(_('Invalid CSRF token.'), 'danger');
+            $this->authenticationService->auth($sessionEntity);
+        }
+
         // If a user had just entered his/her login && password, store them in our session.
         if (isset($_POST["authenticate"])) {
             if ($_POST['password'] != '') {

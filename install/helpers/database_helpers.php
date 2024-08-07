@@ -46,7 +46,7 @@ function updateDatabase($db, $databaseCredentials): void
     }
 
     $fill_perm_items = $db->prepare('INSERT INTO perm_items VALUES (?, ?, ?)');
-    $def_permissions = include 'includes/permissions.php';
+    $def_permissions = getPermissionMappings();
     $db->executeMultiple($fill_perm_items, $def_permissions);
     if (method_exists($fill_perm_items, 'free')) {
         $fill_perm_items->free();
@@ -96,8 +96,8 @@ function generateDatabaseUserInstructions($db, $databaseCredentials): string
             $pa_db_host = substr($current_db_user, strpos($current_db_user, '@') + 1);
         }
 
-        $instructions .= "CREATE USER '" . htmlspecialchars($databaseCredentials['pa_db_user']) . "'@'" . htmlspecialchars($pa_db_host) . "' IDENTIFIED WITH mysql_native_password BY '" . htmlspecialchars($databaseCredentials['pa_db_pass']) . "';\n";
-        $instructions .= "GRANT SELECT, INSERT, UPDATE, DELETE ON " . htmlspecialchars($databaseCredentials['db_name']) . ".* TO '" . htmlspecialchars($databaseCredentials['pa_db_user']) . "'@'" . htmlspecialchars($pa_db_host) . "';\n";
+        $instructions .= "CREATE USER '" . htmlspecialchars($databaseCredentials['pa_db_user']) . "'@'%' IDENTIFIED BY '" . htmlspecialchars($databaseCredentials['pa_db_pass']) . "';\n";
+        $instructions .= "GRANT SELECT, INSERT, UPDATE, DELETE ON " . htmlspecialchars($databaseCredentials['db_name']) . ".* TO '" . htmlspecialchars($databaseCredentials['pa_db_user']) . "'@'%';\n";
     } elseif ($databaseCredentials['db_type'] == 'pgsql') {
         $instructions .= "CREATE USER " . htmlspecialchars($databaseCredentials['pa_db_user']) . " WITH PASSWORD '" . htmlspecialchars($databaseCredentials['pa_db_pass']) . "';\n";
 

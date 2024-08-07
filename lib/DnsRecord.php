@@ -633,6 +633,7 @@ class DnsRecord
                 $error = new ErrorMessage(_('You are trying to delete the SOA record. You are not allowed to remove it, unless you remove the entire zone.'));
                 $errorPresenter = new ErrorPresenter();
                 $errorPresenter->present($error);
+                return false;
             } else {
                 $pdns_db_name = $this->config->get('pdns_db_name');
                 $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
@@ -1403,7 +1404,7 @@ class DnsRecord
             return -1;
         }
 
-        return self::order_domain_results($result, $sortby);
+        return $this->order_domain_results($result, $sortby);
     }
 
     /** Sort Domain Records intelligently
@@ -1413,7 +1414,7 @@ class DnsRecord
      *
      * @return array array of records detail
      */
-    public static function order_domain_results(array $domains, string $sortby): array
+    public function order_domain_results(array $domains, string $sortby): array
     {
         $soa = array();
         $ns = array();
@@ -1433,23 +1434,23 @@ class DnsRecord
 
         switch ($sortby) {
             case 'id':
-                usort($domains, 'self::sort_domain_results_by_id');
+                usort($domains, [$this, 'sort_domain_results_by_id']);
                 break;
             case 'type':
-                usort($domains, 'self::sort_domain_results_by_type');
+                usort($domains, [$this, 'sort_domain_results_by_type']);
                 break;
             case 'content':
-                usort($domains, 'self::sort_domain_results_by_content');
+                usort($domains, [$this, 'sort_domain_results_by_content']);
                 break;
             case 'prio':
-                usort($domains, 'self::sort_domain_results_by_prio');
+                usort($domains, [$this, 'sort_domain_results_by_prio']);
                 break;
             case 'ttl':
-                usort($domains, 'self::sort_domain_results_by_ttl');
+                usort($domains, [$this, 'sort_domain_results_by_ttl']);
                 break;
             case 'name':
             default:
-                usort($domains, 'self::sort_domain_results_by_name');
+                usort($domains, [$this, 'sort_domain_results_by_name']);
                 break;
         }
 
@@ -1464,7 +1465,7 @@ class DnsRecord
      *
      * @return int result of strnatcmp
      */
-    public static function sort_domain_results_by_id(array $a, array $b): int
+    private function sort_domain_results_by_id(array $a, array $b): int
     {
         return strnatcmp($a['id'], $b['id']);
     }
@@ -1476,7 +1477,7 @@ class DnsRecord
      *
      * @return int result of strnatcmp
      */
-    public static function sort_domain_results_by_name(array $a, array $b): int
+    private function sort_domain_results_by_name(array $a, array $b): int
     {
         return strnatcmp($a['name'], $b['name']);
     }
@@ -1488,7 +1489,7 @@ class DnsRecord
      *
      * @return int result of strnatcmp
      */
-    public static function sort_domain_results_by_type(array $a, array $b): int
+    private function sort_domain_results_by_type(array $a, array $b): int
     {
         if ($a['type'] != $b['type']) {
             return strnatcmp($a['type'], $b['type']);
@@ -1504,7 +1505,7 @@ class DnsRecord
      *
      * @return int result of strnatcmp
      */
-    public static function sort_domain_results_by_content(array $a, array $b): int
+    private function sort_domain_results_by_content(array $a, array $b): int
     {
         if ($a['content'] != $b['content']) {
             return strnatcmp($a['content'], $b['content']);
@@ -1520,7 +1521,7 @@ class DnsRecord
      *
      * @return int result of strnatcmp
      */
-    public static function sort_domain_results_by_prio(array $a, array $b): int
+    private function sort_domain_results_by_prio(array $a, array $b): int
     {
         if ($a['prio'] != $b['prio']) {
             return strnatcmp($a['prio'], $b['prio']);
@@ -1536,7 +1537,7 @@ class DnsRecord
      *
      * @return int result of strnatcmp
      */
-    public static function sort_domain_results_by_ttl(array $a, array $b): int
+    private function sort_domain_results_by_ttl(array $a, array $b): int
     {
         if ($a['ttl'] != $b['ttl']) {
             return strnatcmp($a['ttl'], $b['ttl']);

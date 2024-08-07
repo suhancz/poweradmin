@@ -37,7 +37,10 @@ class SwitchThemeController extends BaseController
 
     private function setThemeCookie(string $selectedTheme): void
     {
-        setcookie("theme", $selectedTheme, ['HttpOnly' => true]);
+        setcookie("theme", $selectedTheme, [
+            'httponly' => true,
+            'secure' => true,
+        ]);
     }
 
     private function redirectToPreviousPage(): void
