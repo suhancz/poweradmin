@@ -39,6 +39,7 @@ use Poweradmin\Domain\Service\Dns;
 use Poweradmin\Domain\Service\DnsIdnService;
 use Poweradmin\Domain\Service\DnsRecord;
 use Poweradmin\Domain\Service\DnsValidation\HostnameValidator;
+use Poweradmin\Domain\Service\UserContextService;
 use Poweradmin\Domain\Utility\DnsHelper;
 use Poweradmin\Infrastructure\Logger\LegacyLogger;
 use Symfony\Component\Validator\Constraints as Assert;
@@ -47,12 +48,14 @@ class AddZoneMasterController extends BaseController
 {
 
     private LegacyLogger $logger;
+    private UserContextService $userContext;
 
     public function __construct(array $request)
     {
         parent::__construct($request);
 
         $this->logger = new LegacyLogger($this->db);
+        $this->userContext = new UserContextService();
     }
 
     public function run(): void
@@ -90,7 +93,7 @@ class AddZoneMasterController extends BaseController
             $this->showFirstValidationError($_POST);
         }
 
-        $pdnssec_use = $this->config->get('pdnssec', 'use', false);
+        $pdnssec_use = $this->config->get('dnssec', 'enabled', false);
         $dns_third_level_check = $this->config->get('dns', 'third_level_check', false);
 
         $zone_name = DnsIdnService::toPunycode(trim($_POST['domain']));
@@ -114,7 +117,7 @@ class AddZoneMasterController extends BaseController
             $this->logger->logInfo(sprintf(
                 'client_ip:%s user:%s operation:add_zone zone_name:%s zone_type:%s zone_template:%s',
                 $_SERVER['REMOTE_ADDR'],
-                $_SESSION["userlogin"],
+                $this->userContext->getLoggedInUsername(),
                 $zone_name,
                 $dom_type,
                 $zone_template
@@ -124,7 +127,10 @@ class AddZoneMasterController extends BaseController
                 $dnssecProvider = DnssecProviderFactory::create($this->db, $this->getConfig());
 
                 if (isset($_POST['dnssec']) && $dnssecProvider->isDnssecEnabled()) {
-                    $dnssecProvider->secureZone($zone_name);
+                    $secureResult = $dnssecProvider->secureZone($zone_name);
+                    if (!$secureResult) {
+                        $this->setMessage('list_forward_zones', 'warning', _('Zone was created, but securing it with DNSSEC failed.'));
+                    }
                 }
 
                 $dnssecProvider->rectifyZone($zone_name);
@@ -145,6 +151,7 @@ class AddZoneMasterController extends BaseController
     {
         $perm_view_others = UserManager::verifyPermission($this->db, 'user_view_others');
         $zone_templates = new ZoneTemplate($this->db, $this->getConfig());
+        $pdnssec_use = $this->config->get('dnssec', 'enabled', false);
 
         // Keep the submitted zone name if there was an error
         $domain_value = isset($_POST['domain']) ? htmlspecialchars($_POST['domain']) : '';
@@ -181,22 +188,27 @@ class AddZoneMasterController extends BaseController
         // Safely handle the domain type value
         $valid_domain_types = array("MASTER", "NATIVE");
         $dom_type_value = isset($_POST['dom_type']) && in_array($_POST['dom_type'], $valid_domain_types) ?
-            $_POST['dom_type'] : $this->config->get('interface', 'zone_type_default', 'NATIVE');
+            $_POST['dom_type'] : $this->config->get('dns', 'zone_type_default', 'NATIVE');
 
         $is_post_request = !empty($_POST);
 
         // Create a sanitized version of the DNSSEC checkbox status
         $dnssec_checked = isset($_POST['dnssec']) && $_POST['dnssec'] == '1';
 
+        // Get available templates for this user
+        $userId = $this->userContext->getLoggedInUserId();
+        $templates = $zone_templates->getListZoneTempl($userId);
+
         $this->render('add_zone_master.html', [
             'perm_view_others' => $perm_view_others,
-            'session_user_id' => $_SESSION['userid'],
+            'session_user_id' => $userId,
             'available_zone_types' => $valid_domain_types,
             'users' => UserManager::showUsers($this->db),
-            'zone_templates' => $zone_templates->getListZoneTempl($_SESSION['userid']),
-            'iface_zone_type_default' => $this->config->get('interface', 'zone_type_default', 'NATIVE'),
+            'zone_templates' => $templates,
+            'can_use_templates' => !empty($templates),
+            'iface_zone_type_default' => $this->config->get('dns', 'zone_type_default', 'NATIVE'),
             'iface_add_domain_record' => $this->config->get('interface', 'add_domain_record', false),
-            'pdnssec_use' => $this->config->get('dnssec', 'enabled', false),
+            'pdnssec_use' => $pdnssec_use,
             'domain_value' => $domain_value,
             'zone_template_value' => $zone_template_value,
             'owner_value' => $owner_value,

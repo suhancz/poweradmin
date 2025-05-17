@@ -1,3 +1,11 @@
+{% if not (perm_view_others or perm_edit_others or perm_add_new or perm_is_godlike) %}
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="index.php">{% trans %}Home{% endtrans %}</a></li>
+        <li class="breadcrumb-item" aria-current="page">{% trans %}Edit profile{% endtrans %}</li>
+    </ol>
+</nav>
+{% else %}
 <nav aria-label="breadcrumb">
     <ol class="breadcrumb">
         <li class="breadcrumb-item"><a href="index.php">{% trans %}Home{% endtrans %}</a></li>
@@ -5,6 +13,7 @@
         <li class="breadcrumb-item" aria-current="page">{% trans %}Edit user{% endtrans %}</li>
     </ol>
 </nav>
+{% endif %}
 
 <div class="card shadow-sm mb-4">
     <div class="card-header py-3">
@@ -70,12 +79,17 @@
                         <small class="text-muted">{% trans %}Optional information about this user{% endtrans %}</small>
                     </div>
 
+                    {% if user['uid'] != session_user_id %}
                     <div class="mb-3">
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="active" name="active" value="1" {{ check }}>
                             <label class="form-check-label" for="active">{% trans %}Enabled{% endtrans %}</label>
                         </div>
                     </div>
+                    {% else %}
+                    <!-- Hidden input to ensure the user cannot disable their own account -->
+                    <input type="hidden" name="active" value="1">
+                    {% endif %}
 
                     {% if ldap_use %}
                     <div class="mb-3">
@@ -95,9 +109,15 @@
                         <button type="reset" class="btn btn-secondary btn-sm" name="reset">
                             <i class="bi bi-arrow-counterclockwise me-1 text-white"></i>{% trans %}Reset{% endtrans %}
                         </button>
+                        {% if not (perm_view_others or perm_edit_others or perm_add_new or perm_is_godlike) %}
+                        <a href="index.php" class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-arrow-left me-1"></i>{% trans %}Back to Home{% endtrans %}
+                        </a>
+                        {% else %}
                         <a href="index.php?page=users" class="btn btn-outline-secondary btn-sm">
                             <i class="bi bi-arrow-left me-1"></i>{% trans %}Back to Users{% endtrans %}
                         </a>
+                        {% endif %}
                     </div>
                 </div>
 
@@ -152,12 +172,16 @@
 
                             <p class="mb-2">{% trans %}Based on this template, this user has the following permissions{% endtrans %}:</p>
 
-                            <ul class="small">
-                                {% for item in user_permissions %}
-                                {% set descr = item['descr'] %}
-                                <li>{{ descr|trans }} <span class="text-muted">({{ item['name'] }})</span></li>
-                                {% endfor %}
-                            </ul>
+                            {% if user_permissions is empty %}
+                                <p class="small text-muted fst-italic">{% trans %}No permissions are assigned to this template{% endtrans %}</p>
+                            {% else %}
+                                <ul class="small">
+                                    {% for item in user_permissions %}
+                                    {% set descr = item['descr'] %}
+                                    <li>{{ descr|trans }} <span class="text-muted">({{ item['name'] }})</span></li>
+                                    {% endfor %}
+                                </ul>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
