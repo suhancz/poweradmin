@@ -33,4 +33,45 @@ class UserContextService
     {
         return $_SESSION['userid'] ?? null;
     }
+
+    public function getDisplayName(): ?string
+    {
+        return $_SESSION['name'] ?? $this->getLoggedInUsername();
+    }
+
+    public function getAuthMethod(): ?string
+    {
+        return $_SESSION['auth_used'] ?? null;
+    }
+
+    public function isAuthenticated(): bool
+    {
+        $userId = $this->getLoggedInUserId();
+        return $userId !== null && $userId > 0;
+    }
+
+    public function getUserLanguage(): ?string
+    {
+        return $_SESSION['userlang'] ?? null;
+    }
+
+    public function setUserLanguage(string $language): void
+    {
+        $_SESSION['userlang'] = $language;
+    }
+
+    public function hasSessionData(string $key): bool
+    {
+        return isset($_SESSION[$key]);
+    }
+
+    public function getSessionData(string $key): mixed
+    {
+        return $_SESSION[$key] ?? null;
+    }
+
+    public function setSessionData(string $key, mixed $value): void
+    {
+        $_SESSION[$key] = $value;
+    }
 }

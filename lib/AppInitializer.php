@@ -23,9 +23,10 @@
 namespace Poweradmin;
 
 use Poweradmin\Application\Service\DatabaseService;
+use Poweradmin\Domain\Service\UserContextService;
 use Poweradmin\Infrastructure\Configuration\ConfigurationManager;
 use Poweradmin\Infrastructure\Database\PDODatabaseConnection;
-use Poweradmin\Infrastructure\Database\PDOLayer;
+use Poweradmin\Infrastructure\Database\PDOCommon;
 use Poweradmin\Infrastructure\Service\MessageService;
 use Poweradmin\Infrastructure\Service\SessionAuthenticator;
 use Poweradmin\Infrastructure\Utility\DependencyCheck;
@@ -41,8 +42,8 @@ class AppInitializer
     /** @var ConfigurationManager $configManager Configuration manager */
     private ConfigurationManager $configManager;
 
-    /** @var PDOLayer $db Database connection layer */
-    private PDOLayer $db;
+    /** @var PDOCommon $db Database connection layer */
+    private PDOCommon $db;
 
     /**
      * AppInitializer constructor.
@@ -112,8 +113,9 @@ class AppInitializer
         $supportedLocales = explode(',', $enabledLanguages);
         $locale = new LocaleManager($supportedLocales, './locale');
 
+        $userContextService = new UserContextService();
         $defaultLanguage = $this->configManager->get('interface', 'language', 'en_EN');
-        $userLang = $_SESSION["userlang"] ?? $defaultLanguage;
+        $userLang = $userContextService->getUserLanguage() ?? $defaultLanguage;
         $locale->setLocale($userLang);
     }
 
@@ -136,6 +138,7 @@ class AppInitializer
             'db_collation' => $dbConfig['collation'] ?? '',
             'db_type' => $dbConfig['type'] ?? '',
             'db_file' => $dbConfig['file'] ?? '',
+            'db_debug' => $dbConfig['debug'] ?? false,
         ];
 
         $databaseConnection = new PDODatabaseConnection();
@@ -155,9 +158,9 @@ class AppInitializer
     /**
      * Gets the database connection.
      *
-     * @return PDOLayer The database connection
+     * @return PDOCommon The database connection
      */
-    public function getDb(): PDOLayer
+    public function getDb(): PDOCommon
     {
         return $this->db;
     }

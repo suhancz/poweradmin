@@ -28,13 +28,14 @@ use Poweradmin\Application\Service\CsrfTokenService;
 use Poweradmin\Application\Service\LdapAuthenticator;
 use Poweradmin\Application\Service\LoginAttemptService;
 use Poweradmin\Application\Service\SqlAuthenticator;
+use Poweradmin\Application\Service\RecaptchaService;
 use Poweradmin\Infrastructure\Configuration\ConfigurationManager;
 use Poweradmin\Application\Service\UserEventLogger;
 use Poweradmin\Domain\Model\SessionEntity;
 use Poweradmin\Domain\Service\AuthenticationService;
 use Poweradmin\Domain\Service\PasswordEncryptionService;
 use Poweradmin\Domain\Service\SessionService;
-use Poweradmin\Infrastructure\Database\PDOLayer;
+use Poweradmin\Infrastructure\Database\PDOCommon;
 use Poweradmin\Infrastructure\Logger\LdapUserEventLogger;
 use Poweradmin\Infrastructure\Logger\Logger;
 use Poweradmin\Infrastructure\Logger\LoggerHandlerFactory;
@@ -43,7 +44,7 @@ use ReflectionClass;
 class SessionAuthenticator extends LoggingService
 {
     private AuthenticationService $authService;
-    private PDOLayer $db;
+    private PDOCommon $db;
     private ConfigurationManager $configManager;
     private UserEventLogger $userEventLogger;
     private LdapUserEventLogger $ldapUserEventLogger;
@@ -51,8 +52,9 @@ class SessionAuthenticator extends LoggingService
     private LdapAuthenticator $ldapAuthenticator;
     private SqlAuthenticator $sqlAuthenticator;
     private LoginAttemptService $loginAttemptService;
+    private RecaptchaService $recaptchaService;
 
-    public function __construct(PDOLayer $connection, ConfigurationManager $configManager)
+    public function __construct(PDOCommon $connection, ConfigurationManager $configManager)
     {
         $shortClassName = (new ReflectionClass(self::class))->getShortName();
         $loggerLevel = $configManager->get('logging', 'level', 'info');
@@ -70,6 +72,7 @@ class SessionAuthenticator extends LoggingService
         $this->ldapUserEventLogger = new LdapUserEventLogger($connection);
 
         $this->loginAttemptService = new LoginAttemptService($connection, $this->configManager);
+        $this->recaptchaService = new RecaptchaService($configManager);
 
         $this->ldapAuthenticator = new LdapAuthenticator(
             $connection,
@@ -135,6 +138,22 @@ class SessionAuthenticator extends LoggingService
         // If a user had just entered his/her login && password, store them in our session.
         if (isset($_POST["authenticate"])) {
             $this->logDebug('User {username} attempting to authenticate', ['username' => $_POST["username"] ?? 'unknown']);
+
+            // Verify reCAPTCHA if enabled
+            if ($this->recaptchaService->isEnabled()) {
+                $recaptchaResponse = $_POST['g-recaptcha-response'] ?? '';
+                $remoteIp = $_SERVER['REMOTE_ADDR'] ?? '';
+
+                if (!$this->recaptchaService->verify($recaptchaResponse, $remoteIp)) {
+                    $this->logWarning('reCAPTCHA verification failed for user {username}', ['username' => $_POST['username'] ?? 'unknown']);
+
+                    $sessionEntity = new SessionEntity(_('reCAPTCHA verification failed. Please try again.'), 'danger');
+                    $this->authService->auth($sessionEntity);
+
+                    $this->logDebug('Authentication blocked due to reCAPTCHA failure for user {username}', ['username' => $_POST['username'] ?? 'unknown']);
+                    return;
+                }
+            }
 
             if ($_POST['password'] != '') {
                 $passwordEncryptionService = new PasswordEncryptionService($session_key);

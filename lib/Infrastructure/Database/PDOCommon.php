@@ -48,18 +48,18 @@ use Poweradmin\Infrastructure\Service\MessageService;
  */
 class PDOCommon extends PDO
 {
+    /**
+     * Debug mode flag
+     * @var bool
+     */
+    protected bool $debug = false;
 
     /**
-     * result limit used in the next query
-     * @var int
+     * Storage for executed queries
+     * @var array
      */
-    private int $limit = 0;
+    protected array $queries = [];
 
-    /**
-     * result offset used in the next query
-     * @var int
-     */
-    private int $from = 0;
 
     /**
      * PDOCommon constructor
@@ -99,17 +99,8 @@ class PDOCommon extends PDO
      */
     public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs): PDOStatement
     {
-        // check if limit has been specified. if so, modify the query
-        if (!empty($this->limit)) {
-            $query .= " LIMIT " . $this->limit;
-            if (!empty($this->from)) {
-                $query .= " OFFSET " . $this->from;
-            }
-
-            // after a query is executed the limits are reset, so that
-            // other queries may be performed with the same object
-            $this->limit = 0;
-            $this->from = 0;
+        if ($this->debug) {
+            $this->queries[] = $query;
         }
 
         try {
@@ -133,66 +124,53 @@ class PDOCommon extends PDO
     }
 
     /**
-     * Return an HTML formatted SQL string
+     * Prepare a statement for execution and return a statement object
      *
-     * @param string $str
-     * @return string
+     * @param string $query
+     * @param array $options
+     * @return PDOStatement|false
      */
-    protected function formatSQLforHTML(string $str): string
+    public function prepare(string $query, array $options = []): PDOStatement|false
     {
-        $Keyword = array("SELECT ", "WHERE ", " ON ", "AND ", "OR ",
-            "FROM ", "LIMIT ", "UNION ",
-            "INNER ", "LEFT ", "RIGHT ", "JOIN ", ",",
-            "GROUP BY ", "ORDER BY ", "HAVING ");
-        foreach ($Keyword as $key => $value) {
-            if ($value == ",") {
-                $Replace[$key] = "<b>" . $value . "</b>\n";
-            } else {
-                $Replace[$key] = "\n<b>" . $value . "</b>";
-            }
+        if ($this->debug) {
+            $this->queries[] = $query;
         }
 
-        return str_replace($Keyword, $Replace, $str);
+        return parent::prepare($query, $options);
     }
 
     /**
-     * Execute the specified query, fetch the value from the first column of
-     * the first result row
+     * Execute a statement
      *
-     * @param string $str
-     * @return mixed
+     * @param string $statement
+     * @return int|false
      */
-    public function queryOne(string $str): mixed
+    public function exec(string $statement): int|false
     {
-        $result = $this->query($str);
-        $row = $result->fetch(PDO::FETCH_NUM);
-        if (is_bool($row)) {
-            return $row;
+        if ($this->debug) {
+            $this->queries[] = $statement;
         }
-        return $row[0];
+
+        return parent::exec($statement);
     }
 
     /**
-     * Execute the specified query, fetch values from first result row
+     * Enable/disable debug mode
      *
-     * @param string $str
-     * @return mixed
+     * @param bool $debug
      */
-    public function queryRow(string $str): mixed
+    public function setDebug(bool $debug): void
     {
-        $obj_pdoStatement = parent::query($str);
-        return $obj_pdoStatement->fetch(PDO::FETCH_ASSOC);
+        $this->debug = $debug;
     }
 
     /**
-     * Set the range of the next query
+     * Get all executed queries
      *
-     * @param int $limit
-     * @param int $from
+     * @return array
      */
-    public function setLimit(int $limit, int $from = 0): void
+    public function getQueries(): array
     {
-        $this->limit = $limit;
-        $this->from = $from;
+        return $this->queries;
     }
 }

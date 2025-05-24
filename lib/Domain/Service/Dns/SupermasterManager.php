@@ -25,7 +25,7 @@ namespace Poweradmin\Domain\Service\Dns;
 use Poweradmin\Domain\Service\DnsValidation\HostnameValidator;
 use Poweradmin\Domain\Service\DnsValidation\IPAddressValidator;
 use Poweradmin\Infrastructure\Configuration\ConfigurationManager;
-use Poweradmin\Infrastructure\Database\PDOLayer;
+use Poweradmin\Infrastructure\Database\PDOCommon;
 use Poweradmin\Infrastructure\Service\MessageService;
 
 /**
@@ -33,7 +33,7 @@ use Poweradmin\Infrastructure\Service\MessageService;
  */
 class SupermasterManager implements SupermasterManagerInterface
 {
-    private PDOLayer $db;
+    private PDOCommon $db;
     private ConfigurationManager $config;
     private MessageService $messageService;
     private HostnameValidator $hostnameValidator;
@@ -42,10 +42,10 @@ class SupermasterManager implements SupermasterManagerInterface
     /**
      * Constructor
      *
-     * @param PDOLayer $db Database connection
+     * @param PDOCommon $db Database connection
      * @param ConfigurationManager $config Configuration manager
      */
-    public function __construct(PDOLayer $db, ConfigurationManager $config)
+    public function __construct(PDOCommon $db, ConfigurationManager $config)
     {
         $this->db = $db;
         $this->config = $config;
@@ -115,8 +115,11 @@ class SupermasterManager implements SupermasterManagerInterface
             $pdns_db_name = $this->config->get('database', 'pdns_name');
             $supermasters_table = $pdns_db_name ? $pdns_db_name . ".supermasters" : "supermasters";
 
-            $this->db->query("DELETE FROM $supermasters_table WHERE ip = " . $this->db->quote($master_ip, 'text') .
-                " AND nameserver = " . $this->db->quote($ns_name, 'text'));
+            $stmt = $this->db->prepare("DELETE FROM $supermasters_table WHERE ip = :master_ip AND nameserver = :ns_name");
+            $stmt->execute([
+                ':master_ip' => $master_ip,
+                ':ns_name' => $ns_name
+            ]);
             return true;
         } else {
             $this->messageService->addSystemError(sprintf(_('Invalid argument(s) given to function %s %s'), "deleteSupermaster", "No or no valid ipv4 or ipv6 address given."));
@@ -165,7 +168,9 @@ class SupermasterManager implements SupermasterManagerInterface
             $pdns_db_name = $this->config->get('database', 'pdns_name');
             $supermasters_table = $pdns_db_name ? $pdns_db_name . ".supermasters" : "supermasters";
 
-            $result = $this->db->queryRow("SELECT ip,nameserver,account FROM $supermasters_table WHERE ip = " . $this->db->quote($master_ip, 'text'));
+            $stmt = $this->db->prepare("SELECT ip,nameserver,account FROM $supermasters_table WHERE ip = :master_ip");
+            $stmt->execute([':master_ip' => $master_ip]);
+            $result = $stmt->fetch();
 
             return array(
                 "master_ip" => $result["ip"],
@@ -191,7 +196,9 @@ class SupermasterManager implements SupermasterManagerInterface
             $pdns_db_name = $this->config->get('database', 'pdns_name');
             $supermasters_table = $pdns_db_name ? $pdns_db_name . ".supermasters" : "supermasters";
 
-            $result = $this->db->queryOne("SELECT ip FROM $supermasters_table WHERE ip = " . $this->db->quote($master_ip, 'text'));
+            $stmt = $this->db->prepare("SELECT ip FROM $supermasters_table WHERE ip = :master_ip");
+            $stmt->execute([':master_ip' => $master_ip]);
+            $result = $stmt->fetchColumn();
             return (bool)$result;
         } else {
             $this->messageService->addSystemError(sprintf(_('Invalid argument(s) given to function %s %s'), "supermasterExists", "No or no valid IPv4 or IPv6 address given."));
@@ -213,8 +220,12 @@ class SupermasterManager implements SupermasterManagerInterface
             $pdns_db_name = $this->config->get('database', 'pdns_name');
             $supermasters_table = $pdns_db_name ? $pdns_db_name . ".supermasters" : "supermasters";
 
-            $result = $this->db->queryOne("SELECT ip FROM $supermasters_table WHERE ip = " . $this->db->quote($master_ip, 'text') .
-                " AND nameserver = " . $this->db->quote($ns_name, 'text'));
+            $stmt = $this->db->prepare("SELECT ip FROM $supermasters_table WHERE ip = :master_ip AND nameserver = :ns_name");
+            $stmt->execute([
+                ':master_ip' => $master_ip,
+                ':ns_name' => $ns_name
+            ]);
+            $result = $stmt->fetchColumn();
             return (bool)$result;
         } else {
             $this->messageService->addSystemError(sprintf(_('Invalid argument(s) given to function %s %s'), "supermasterExists", "No or no valid IPv4 or IPv6 address given."));
@@ -285,6 +296,28 @@ class SupermasterManager implements SupermasterManagerInterface
         ]);
 
         return (bool)$result;
+    }
+
+    /**
+     * Get distinct slave server IP addresses
+     *
+     * @return array List of unique slave server IP addresses
+     */
+    public function getSlaveServerIPs(): array
+    {
+        $pdns_db_name = $this->config->get('database', 'pdns_name');
+        $supermasters_table = $pdns_db_name ? $pdns_db_name . ".supermasters" : "supermasters";
+
+        $result = $this->db->query("SELECT ip FROM $supermasters_table GROUP BY ip");
+
+        $slaveServerIPs = [];
+        if ($result) {
+            while ($row = $result->fetch(\PDO::FETCH_ASSOC)) {
+                $slaveServerIPs[] = $row['ip'];
+            }
+        }
+
+        return $slaveServerIPs;
     }
 
     /**

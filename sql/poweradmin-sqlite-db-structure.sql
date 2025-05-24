@@ -6,6 +6,21 @@ CREATE TABLE log_users (id integer PRIMARY KEY, event VARCHAR(2048) NOT NULL, cr
 CREATE TABLE log_zones (id integer PRIMARY KEY, event VARCHAR(2048) NOT NULL, created_at timestamp DEFAULT current_timestamp, priority integer NOT NULL, zone_id integer);
 
 
+CREATE TABLE login_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NULL,
+    ip_address VARCHAR(45) NOT NULL,
+    timestamp INTEGER NOT NULL,
+    successful BOOLEAN NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+        ON DELETE SET NULL
+);
+
+CREATE INDEX idx_login_attempts_user_id ON login_attempts(user_id);
+CREATE INDEX idx_login_attempts_ip_address ON login_attempts(ip_address);
+CREATE INDEX idx_login_attempts_timestamp ON login_attempts(timestamp);
+
+
 CREATE TABLE migrations (
     version INTEGER PRIMARY KEY,
     migration_name VARCHAR(100) NULL,
@@ -39,6 +54,8 @@ INSERT INTO "perm_items" ("id", "name", "descr") VALUES (59,	'user_edit_templ_pe
 INSERT INTO "perm_items" ("id", "name", "descr") VALUES (60,	'templ_perm_add',	'User is allowed to add new permission templates.');
 INSERT INTO "perm_items" ("id", "name", "descr") VALUES (61,	'templ_perm_edit',	'User is allowed to edit existing permission templates.');
 INSERT INTO "perm_items" ("id", "name", "descr") VALUES (62,	'zone_content_edit_own_as_client',	'User is allowed to edit record, but not SOA and NS.');
+INSERT INTO "perm_items" ("id", "name", "descr") VALUES (63,	'zone_templ_add',	'User is allowed to add new zone templates.');
+INSERT INTO "perm_items" ("id", "name", "descr") VALUES (64,	'zone_templ_edit',	'User is allowed to edit existing zone templates.');
 
 CREATE TABLE perm_templ (id integer PRIMARY KEY, name VARCHAR(128) NOT NULL, descr VARCHAR(1024) NOT NULL);
 
@@ -55,7 +72,14 @@ CREATE TABLE users (id integer PRIMARY KEY, username VARCHAR(64) NOT NULL, passw
 
 INSERT INTO "users" ("id", "username", "password", "fullname", "email", "description", "perm_templ", "active", "use_ldap") VALUES (1,	'admin',	'$2y$12$10ei/WGJPcUY9Ea8/eVage9zBbxr0xxW82qJF/cfSyev/jX84WHQe',	'Administrator',	'admin@example.net',	'Administrator with full rights.',	1,	1,	0);
 
-CREATE TABLE zone_templ (id integer PRIMARY KEY, name VARCHAR(128) NOT NULL, descr VARCHAR(1024) NOT NULL, owner integer NOT NULL);
+CREATE TABLE zone_templ (
+    id integer PRIMARY KEY, 
+    name VARCHAR(128) NOT NULL, 
+    descr VARCHAR(1024) NOT NULL, 
+    owner integer NOT NULL,
+    created_by integer,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
 
 
 CREATE TABLE zone_templ_records (id integer PRIMARY KEY, zone_templ_id integer NOT NULL, name VARCHAR(255) NOT NULL, type VARCHAR(6) NOT NULL, content VARCHAR(2048) NOT NULL, ttl integer NOT NULL, prio integer NOT NULL);
@@ -95,5 +119,33 @@ CREATE TABLE user_mfa (
 
 CREATE UNIQUE INDEX idx_user_mfa_user_id ON user_mfa(user_id);
 CREATE INDEX idx_user_mfa_enabled ON user_mfa(enabled);
+
+CREATE TABLE user_preferences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    preference_key VARCHAR(100) NOT NULL,
+    preference_value TEXT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX idx_user_preferences_user_key ON user_preferences(user_id, preference_key);
+CREATE INDEX idx_user_preferences_user_id ON user_preferences(user_id);
+
+CREATE TABLE zone_template_sync (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    zone_id INTEGER NOT NULL,
+    zone_templ_id INTEGER NOT NULL,
+    last_synced TIMESTAMP NULL,
+    template_last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    needs_sync INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (zone_id) REFERENCES domains(id) ON DELETE CASCADE,
+    FOREIGN KEY (zone_templ_id) REFERENCES zone_templ(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX idx_zone_template_unique ON zone_template_sync(zone_id, zone_templ_id);
+CREATE INDEX idx_zone_templ_id ON zone_template_sync(zone_templ_id);
+CREATE INDEX idx_needs_sync ON zone_template_sync(needs_sync);
 
 --

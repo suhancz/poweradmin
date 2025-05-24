@@ -22,11 +22,30 @@
 
 namespace Poweradmin\Domain\Repository;
 
+use Poweradmin\Domain\Model\Constants;
+
 /**
  * Interface for DNS record repository operations
  */
 interface RecordRepositoryInterface
 {
+    /**
+     * Get records by domain ID
+     *
+     * @param int $domainId Domain ID
+     * @param string|null $recordType Optional record type filter
+     * @return array Array of records
+     */
+    public function getRecordsByDomainId(int $domainId, ?string $recordType = null): array;
+
+    /**
+     * Get a record by ID
+     *
+     * @param int $recordId Record ID
+     * @return array|null Record data if found, null otherwise
+     */
+    public function getRecordById(int $recordId): ?array;
+
     /**
      * Get Zone ID from Record ID
      *
@@ -60,9 +79,9 @@ interface RecordRepositoryInterface
      * Retrieve all fields of the record and send it back to the function caller.
      *
      * @param int $id Record ID
-     * @return int|array array of record detail, or -1 if nothing found
+     * @return array|null array of record detail, or null if nothing found
      */
-    public function getRecordFromId(int $id): int|array;
+    public function getRecordFromId(int $id): ?array;
 
     /**
      * Get all records from a domain id.
@@ -72,14 +91,14 @@ interface RecordRepositoryInterface
      * @param string $db_type Database type
      * @param int $id Domain ID
      * @param int $rowstart Starting row [default=0]
-     * @param int $rowamount Number of rows to return in this query [default=999999]
+     * @param int $rowamount Number of rows to return in this query [default=9999]
      * @param string $sortby Column to sort by [default='name']
      * @param string $sortDirection Sort direction [default='ASC']
      * @param bool $fetchComments Whether to fetch record comments [default=false]
      *
-     * @return int|array array of record detail, or -1 if nothing found
+     * @return array array of record details (empty array if nothing found)
      */
-    public function getRecordsFromDomainId(string $db_type, int $id, int $rowstart = 0, int $rowamount = 999999, string $sortby = 'name', string $sortDirection = 'ASC', bool $fetchComments = false): array|int;
+    public function getRecordsFromDomainId(string $db_type, int $id, int $rowstart = 0, int $rowamount = Constants::DEFAULT_MAX_ROWS, string $sortby = 'name', string $sortDirection = 'ASC', bool $fetchComments = false): array;
 
     /**
      * Record ID to Domain ID
@@ -112,6 +131,16 @@ interface RecordRepositoryInterface
     public function recordExists(int $domain_id, string $name, string $type, string $content): bool;
 
     /**
+     * Check if any PTR record exists for a given reverse domain name
+     *
+     * @param int $domain_id Domain ID
+     * @param string $name Reverse domain name (e.g., "1.1.168.192.in-addr.arpa")
+     *
+     * @return bool True if any PTR record exists for this name
+     */
+    public function hasPtrRecord(int $domain_id, string $name): bool;
+
+    /**
      * Check if record has similar records with same name and type
      *
      * @param int $domain_id Domain ID
@@ -130,4 +159,48 @@ interface RecordRepositoryInterface
      * @return string Serial Number or false if not found
      */
     public function getSerialByZid(int $zid): string;
+
+    /**
+     * Get filtered records from a domain with search capabilities
+     *
+     * @param int $zone_id The zone ID
+     * @param int $row_start Starting row for pagination
+     * @param int $row_amount Number of rows per page
+     * @param string $sort_by Column to sort by
+     * @param string $sort_direction Sort direction (ASC or DESC)
+     * @param bool $include_comments Whether to include comments
+     * @param string $search_term Optional search term to filter by name or content
+     * @param string $type_filter Optional record type filter
+     * @param string $content_filter Optional content filter
+     * @return array Array of filtered records
+     */
+    public function getFilteredRecords(
+        int $zone_id,
+        int $row_start,
+        int $row_amount,
+        string $sort_by,
+        string $sort_direction,
+        bool $include_comments,
+        string $search_term = '',
+        string $type_filter = '',
+        string $content_filter = ''
+    ): array;
+
+    /**
+     * Get count of filtered records
+     *
+     * @param int $zone_id The zone ID
+     * @param bool $include_comments Whether to include comments in the search
+     * @param string $search_term Optional search term to filter by name or content
+     * @param string $type_filter Optional record type filter
+     * @param string $content_filter Optional content filter
+     * @return int Number of filtered records
+     */
+    public function getFilteredRecordCount(
+        int $zone_id,
+        bool $include_comments,
+        string $search_term = '',
+        string $type_filter = '',
+        string $content_filter = ''
+    ): int;
 }

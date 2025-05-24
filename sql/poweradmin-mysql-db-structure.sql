@@ -26,6 +26,22 @@ CREATE TABLE `log_zones` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
+CREATE TABLE `login_attempts` (
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `user_id` int(11) NULL,
+    `ip_address` varchar(45) NOT NULL,
+    `timestamp` int(11) NOT NULL,
+    `successful` tinyint(1) NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `idx_user_id` (`user_id`),
+    KEY `idx_ip_address` (`ip_address`),
+    KEY `idx_timestamp` (`timestamp`),
+    CONSTRAINT `fk_login_attempts_users`
+        FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
 CREATE TABLE `migrations` (
                               `version` bigint(20) NOT NULL,
                               `migration_name` varchar(100) DEFAULT NULL,
@@ -65,7 +81,9 @@ INSERT INTO `perm_items` (`id`, `name`, `descr`) VALUES
                                                      (59,	'user_edit_templ_perm',	'User is allowed to change the permission template that is assigned to a user.'),
                                                      (60,	'templ_perm_add',	'User is allowed to add new permission templates.'),
                                                      (61,	'templ_perm_edit',	'User is allowed to edit existing permission templates.'),
-                                                     (62,	'zone_content_edit_own_as_client',	'User is allowed to edit record, but not SOA and NS.');
+                                                     (62,	'zone_content_edit_own_as_client',	'User is allowed to edit record, but not SOA and NS.'),
+                                                     (63,	'zone_templ_add',	'User is allowed to add new zone templates.'),
+                                                     (64,	'zone_templ_edit',	'User is allowed to edit existing zone templates.');
 
 CREATE TABLE `perm_templ` (
                               `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -125,7 +143,9 @@ CREATE TABLE `zone_templ` (
                               `name` varchar(128) NOT NULL,
                               `descr` varchar(1024) NOT NULL,
                               `owner` int(11) NOT NULL,
-                              PRIMARY KEY (`id`)
+                              `created_by` int(11) DEFAULT NULL,
+                              PRIMARY KEY (`id`),
+                              CONSTRAINT `fk_zone_templ_users` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
@@ -144,7 +164,7 @@ CREATE TABLE `api_keys` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
     `name` varchar(255) NOT NULL,
     `secret_key` varchar(255) NOT NULL,
-    `created_by` int(11) NOT NULL,
+    `created_by` int(11) DEFAULT NULL,
     `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `last_used_at` timestamp NULL DEFAULT NULL,
     `disabled` tinyint(1) NOT NULL DEFAULT '0',
@@ -171,6 +191,34 @@ CREATE TABLE `user_mfa` (
     UNIQUE KEY `idx_user_mfa_user_id` (`user_id`),
     KEY `idx_user_mfa_enabled` (`enabled`),
     CONSTRAINT `fk_user_mfa_users` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `user_preferences` (
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `user_id` int(11) NOT NULL,
+    `preference_key` varchar(100) NOT NULL,
+    `preference_value` text DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `idx_user_preferences_user_key` (`user_id`, `preference_key`),
+    KEY `idx_user_preferences_user_id` (`user_id`),
+    CONSTRAINT `fk_user_preferences_users` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `zone_template_sync` (
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `zone_id` int(11) NOT NULL,
+    `zone_templ_id` int(11) NOT NULL,
+    `last_synced` timestamp NULL DEFAULT NULL,
+    `template_last_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `needs_sync` tinyint(1) NOT NULL DEFAULT 0,
+    `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `idx_zone_template_unique` (`zone_id`, `zone_templ_id`),
+    KEY `idx_zone_templ_id` (`zone_templ_id`),
+    KEY `idx_needs_sync` (`needs_sync`),
+    CONSTRAINT `fk_zone_template_sync_zone` FOREIGN KEY (`zone_id`) REFERENCES `domains` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT `fk_zone_template_sync_templ` FOREIGN KEY (`zone_templ_id`) REFERENCES `zone_templ` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 2022-09-29 19:08:10

@@ -24,7 +24,7 @@ namespace Poweradmin\Domain\Service\DnsValidation;
 
 use Poweradmin\Domain\Service\Validation\ValidationResult;
 use Poweradmin\Infrastructure\Configuration\ConfigurationManager;
-use Poweradmin\Infrastructure\Database\PDOLayer;
+use Poweradmin\Infrastructure\Database\PDOCommon;
 
 /**
  * Validator for CNAME DNS records
@@ -48,15 +48,15 @@ class CNAMERecordValidator implements DnsRecordValidatorInterface
     private HostnameValidator $hostnameValidator;
     private TTLValidator $ttlValidator;
     private ConfigurationManager $config;
-    private PDOLayer $db;
+    private PDOCommon $db;
 
     /**
      * Constructor
      *
      * @param ConfigurationManager $config
-     * @param PDOLayer $db
+     * @param PDOCommon $db
      */
-    public function __construct(ConfigurationManager $config, PDOLayer $db)
+    public function __construct(ConfigurationManager $config, PDOCommon $db)
     {
         $this->hostnameValidator = new HostnameValidator($config);
         $this->ttlValidator = new TTLValidator();
@@ -180,14 +180,18 @@ class CNAMERecordValidator implements DnsRecordValidatorInterface
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
 
-        $where = ($rid > 0 ? " AND id != " . $this->db->quote($rid, 'integer') : '');
         // Check if there are any records with this name
-        $query = "SELECT id FROM $records_table
-                    WHERE name = " . $this->db->quote($name, 'text') .
-                    " AND TYPE != 'CNAME'" .
-                    $where;
+        if ($rid > 0) {
+            $query = "SELECT id FROM $records_table WHERE name = ? AND TYPE != 'CNAME' AND id != ?";
+            $stmt = $this->db->prepare($query);
+            $stmt->execute([$name, $rid]);
+        } else {
+            $query = "SELECT id FROM $records_table WHERE name = ? AND TYPE != 'CNAME'";
+            $stmt = $this->db->prepare($query);
+            $stmt->execute([$name]);
+        }
 
-        $response = $this->db->queryOne($query);
+        $response = $stmt->fetchColumn();
         if ($response) {
             return ValidationResult::failure(_('This is not a valid CNAME. There already exists a record with this name.'));
         }
@@ -208,11 +212,11 @@ class CNAMERecordValidator implements DnsRecordValidatorInterface
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
 
-        $query = "SELECT id FROM $records_table
-                WHERE content = " . $this->db->quote($name, 'text') . "
-                AND (type = " . $this->db->quote('MX', 'text') . " OR type = " . $this->db->quote('NS', 'text') . ")";
+        $query = "SELECT id FROM $records_table WHERE content = ? AND (type = ? OR type = ?)";
+        $stmt = $this->db->prepare($query);
+        $stmt->execute([$name, 'MX', 'NS']);
 
-        $response = $this->db->queryOne($query);
+        $response = $stmt->fetchColumn();
 
         if (!empty($response)) {
             return ValidationResult::failure(_('This is not a valid CNAME. Did you assign an MX or NS record to the record?'));
@@ -250,12 +254,17 @@ class CNAMERecordValidator implements DnsRecordValidatorInterface
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
 
-        $where = ($rid > 0 ? " AND id != " . $this->db->quote($rid, 'integer') : '');
-        $query = "SELECT id FROM $records_table
-                        WHERE name = " . $this->db->quote($name, 'text') . $where . "
-                        AND TYPE = 'CNAME'";
+        if ($rid > 0) {
+            $query = "SELECT id FROM $records_table WHERE name = ? AND TYPE = 'CNAME' AND id != ?";
+            $stmt = $this->db->prepare($query);
+            $stmt->execute([$name, $rid]);
+        } else {
+            $query = "SELECT id FROM $records_table WHERE name = ? AND TYPE = 'CNAME'";
+            $stmt = $this->db->prepare($query);
+            $stmt->execute([$name]);
+        }
 
-        $response = $this->db->queryOne($query);
+        $response = $stmt->fetchColumn();
         if ($response) {
             return ValidationResult::failure(_('This is not a valid record. There already exists a CNAME with this name.'));
         }

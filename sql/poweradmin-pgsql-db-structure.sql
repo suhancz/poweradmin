@@ -23,6 +23,23 @@ CREATE TABLE "public"."log_zones" (
 ) WITH (oids = false);
 
 
+CREATE SEQUENCE login_attempts_id_seq INCREMENT 1 MINVALUE 1 MAXVALUE 2147483647 CACHE 1;
+
+CREATE TABLE "public"."login_attempts" (
+    "id" integer DEFAULT nextval('login_attempts_id_seq') NOT NULL,
+    "user_id" integer NULL,
+    "ip_address" character varying(45) NOT NULL,
+    "timestamp" integer NOT NULL,
+    "successful" boolean NOT NULL,
+    CONSTRAINT "login_attempts_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "fk_login_attempts_users" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+) WITH (oids = false);
+
+CREATE INDEX "idx_login_attempts_user_id" ON "public"."login_attempts" USING btree ("user_id");
+CREATE INDEX "idx_login_attempts_ip_address" ON "public"."login_attempts" USING btree ("ip_address");
+CREATE INDEX "idx_login_attempts_timestamp" ON "public"."login_attempts" USING btree ("timestamp");
+
+
 CREATE TABLE "public"."migrations" (
                                        "version" bigint NOT NULL,
                                        "migration_name" character varying(100),
@@ -64,7 +81,9 @@ INSERT INTO "perm_items" ("id", "name", "descr") VALUES
                                                      (59,	'user_edit_templ_perm',	'User is allowed to change the permission template that is assigned to a user.'),
                                                      (60,	'templ_perm_add',	'User is allowed to add new permission templates.'),
                                                      (61,	'templ_perm_edit',	'User is allowed to edit existing permission templates.'),
-                                                     (62,	'zone_content_edit_own_as_client',	'User is allowed to edit record, but not SOA and NS.');
+                                                     (62,	'zone_content_edit_own_as_client',	'User is allowed to edit record, but not SOA and NS.'),
+                                                     (63,	'zone_templ_add',	'User is allowed to add new zone templates.'),
+                                                     (64,	'zone_templ_edit',	'User is allowed to edit existing zone templates.');
 
 CREATE SEQUENCE perm_templ_id_seq INCREMENT 1 MINVALUE 1 MAXVALUE 2147483647 CACHE 1;
 
@@ -122,7 +141,9 @@ CREATE TABLE "public"."zone_templ" (
                                        "name" character varying(128),
                                        "descr" character varying(1024),
                                        "owner" integer,
-                                       CONSTRAINT "zone_templ_pkey" PRIMARY KEY ("id")
+                                       "created_by" integer,
+                                       CONSTRAINT "zone_templ_pkey" PRIMARY KEY ("id"),
+                                       CONSTRAINT "fk_zone_templ_users" FOREIGN KEY ("created_by") REFERENCES "users" ("id") ON DELETE SET NULL
 ) WITH (oids = false);
 
 
@@ -189,5 +210,35 @@ CREATE TABLE "public"."user_mfa" (
 
 CREATE UNIQUE INDEX "idx_user_mfa_user_id" ON "public"."user_mfa" USING btree ("user_id");
 CREATE INDEX "idx_user_mfa_enabled" ON "public"."user_mfa" USING btree ("enabled");
+
+CREATE TABLE "user_preferences" (
+    "id" serial NOT NULL,
+    "user_id" integer NOT NULL,
+    "preference_key" character varying(100) NOT NULL,
+    "preference_value" text,
+    CONSTRAINT "user_preferences_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "fk_user_preferences_users" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) WITH (oids = false);
+
+CREATE UNIQUE INDEX "idx_user_preferences_user_key" ON "public"."user_preferences" USING btree ("user_id", "preference_key");
+CREATE INDEX "idx_user_preferences_user_id" ON "public"."user_preferences" USING btree ("user_id");
+
+CREATE TABLE "zone_template_sync" (
+    "id" serial NOT NULL,
+    "zone_id" integer NOT NULL,
+    "zone_templ_id" integer NOT NULL,
+    "last_synced" timestamp,
+    "template_last_modified" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "needs_sync" boolean NOT NULL DEFAULT false,
+    "created_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "zone_template_sync_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "fk_zone_template_sync_zone" FOREIGN KEY (zone_id) REFERENCES domains(id) ON DELETE CASCADE,
+    CONSTRAINT "fk_zone_template_sync_templ" FOREIGN KEY (zone_templ_id) REFERENCES zone_templ(id) ON DELETE CASCADE
+) WITH (oids = false);
+
+CREATE UNIQUE INDEX "idx_zone_template_unique" ON "public"."zone_template_sync" USING btree ("zone_id", "zone_templ_id");
+CREATE INDEX "idx_zone_templ_id" ON "public"."zone_template_sync" USING btree ("zone_templ_id");
+CREATE INDEX "idx_needs_sync" ON "public"."zone_template_sync" USING btree ("needs_sync");
 
 -- 2022-09-29 19:10:39.890321+00

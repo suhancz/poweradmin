@@ -23,8 +23,9 @@
 namespace Poweradmin\Domain\Repository;
 
 use PDO;
+use Poweradmin\Domain\Model\Constants;
 use Poweradmin\Infrastructure\Configuration\ConfigurationManager;
-use Poweradmin\Infrastructure\Database\PDOLayer;
+use Poweradmin\Infrastructure\Database\PDOCommon;
 use Poweradmin\Infrastructure\Service\MessageService;
 use Poweradmin\Infrastructure\Utility\SortHelper;
 
@@ -33,17 +34,18 @@ use Poweradmin\Infrastructure\Utility\SortHelper;
  */
 class RecordRepository implements RecordRepositoryInterface
 {
-    private PDOLayer $db;
+
+    private PDOCommon $db;
     private ConfigurationManager $config;
     private MessageService $messageService;
 
     /**
      * Constructor
      *
-     * @param PDOLayer $db Database connection
+     * @param PDOCommon $db Database connection
      * @param ConfigurationManager $config Configuration manager
      */
-    public function __construct(PDOLayer $db, ConfigurationManager $config)
+    public function __construct(PDOCommon $db, ConfigurationManager $config)
     {
         $this->db = $db;
         $this->config = $config;
@@ -62,8 +64,9 @@ class RecordRepository implements RecordRepositoryInterface
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
 
-        $query = "SELECT domain_id FROM $records_table WHERE id = " . $this->db->quote($rid, 'integer');
-        return $this->db->queryOne($query) ?: 0;
+        $stmt = $this->db->prepare("SELECT domain_id FROM $records_table WHERE id = :id");
+        $stmt->execute([':id' => $rid]);
+        return $stmt->fetchColumn() ?: 0;
     }
 
     /**
@@ -78,8 +81,9 @@ class RecordRepository implements RecordRepositoryInterface
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
 
-        $sqlq = "SELECT COUNT(id) FROM $records_table WHERE domain_id = " . $this->db->quote($zone_id, 'integer') . " AND type IS NOT NULL";
-        return $this->db->queryOne($sqlq) ?: 0;
+        $stmt = $this->db->prepare("SELECT COUNT(id) FROM $records_table WHERE domain_id = :zone_id AND type IS NOT NULL");
+        $stmt->execute([':zone_id' => $zone_id]);
+        return $stmt->fetchColumn() ?: 0;
     }
 
     /**
@@ -94,10 +98,9 @@ class RecordRepository implements RecordRepositoryInterface
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
 
-        $query = "SELECT id AS rid, domain_id AS zid, name, type, content, ttl, prio FROM $records_table WHERE id = " . $this->db->quote($rid, 'integer');
-
-        $response = $this->db->query($query);
-        return $response->fetch() ?: [];
+        $stmt = $this->db->prepare("SELECT id AS rid, domain_id AS zid, name, type, content, ttl, prio FROM $records_table WHERE id = :id");
+        $stmt->execute([':id' => $rid]);
+        return $stmt->fetch() ?: [];
     }
 
     /**
@@ -106,17 +109,19 @@ class RecordRepository implements RecordRepositoryInterface
      * Retrieve all fields of the record and send it back to the function caller.
      *
      * @param int $id Record ID
-     * @return int|array array of record detail, or -1 if nothing found
+     * @return array|null array of record detail, or null if nothing found
      */
-    public function getRecordFromId(int $id): int|array
+    public function getRecordFromId(int $id): ?array
     {
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
 
-        $result = $this->db->queryRow("SELECT * FROM $records_table WHERE id=" . $this->db->quote($id, 'integer') . " AND type IS NOT NULL");
+        $stmt = $this->db->prepare("SELECT * FROM $records_table WHERE id = :id AND type IS NOT NULL");
+        $stmt->execute([':id' => $id]);
+        $result = $stmt->fetch();
         if ($result) {
             if ($result["type"] == "" || $result["content"] == "") {
-                return -1;
+                return null;
             }
 
             return array(
@@ -132,7 +137,7 @@ class RecordRepository implements RecordRepositoryInterface
                 "auth" => $result["auth"],
             );
         } else {
-            return -1;
+            return null;
         }
     }
 
@@ -144,26 +149,22 @@ class RecordRepository implements RecordRepositoryInterface
      * @param string $db_type Database type
      * @param int $id Domain ID
      * @param int $rowstart Starting row [default=0]
-     * @param int $rowamount Number of rows to return in this query [default=999999]
+     * @param int $rowamount Number of rows to return in this query [default=9999]
      * @param string $sortby Column to sort by [default='name']
      * @param string $sortDirection Sort direction [default='ASC']
      * @param bool $fetchComments Whether to fetch record comments [default=false]
      *
-     * @return int|array array of record detail, or -1 if nothing found
+     * @return array array of record details (empty array if nothing found)
      */
-    public function getRecordsFromDomainId(string $db_type, int $id, int $rowstart = 0, int $rowamount = 999999, string $sortby = 'name', string $sortDirection = 'ASC', bool $fetchComments = false): array|int
+    public function getRecordsFromDomainId(string $db_type, int $id, int $rowstart = 0, int $rowamount = Constants::DEFAULT_MAX_ROWS, string $sortby = 'name', string $sortDirection = 'ASC', bool $fetchComments = false): array
     {
         if (!is_numeric($id)) {
-            $this->messageService->addSystemError(sprintf(_('Invalid argument(s) given to function %s'), "getRecordsFromDomainId"));
-
-            return -1;
+            return [];
         }
 
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
         $comments_table = $pdns_db_name ? $pdns_db_name . '.comments' : 'comments';
-
-        $this->db->setLimit($rowamount, $rowstart);
 
         if ($sortby == 'name') {
             $sortby = "$records_table.name";
@@ -183,20 +184,27 @@ class RecordRepository implements RecordRepositoryInterface
                 LIMIT 1
             )" : "NULL") . " AS comment
             FROM $records_table
-            WHERE $records_table.domain_id=" . $this->db->quote($id, 'integer') . "
+            WHERE $records_table.domain_id = :domain_id
             AND $records_table.type IS NOT NULL
             ORDER BY " . $sql_sortby;
 
-        $records = $this->db->query($query);
-        $this->db->setLimit(0);
+        if ($rowamount < Constants::DEFAULT_MAX_ROWS) {
+            $query .= " LIMIT " . $rowamount;
+            if ($rowstart > 0) {
+                $query .= " OFFSET " . $rowstart;
+            }
+        }
+
+        $stmt = $this->db->prepare($query);
+        $stmt->execute([':domain_id' => $id]);
+        $records = $stmt;
 
         if ($records) {
             $result = $records->fetchAll();
-        } else {
-            return -1;
+            return $result ?: [];
         }
 
-        return $result;
+        return [];
     }
 
     /**
@@ -212,8 +220,9 @@ class RecordRepository implements RecordRepositoryInterface
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
 
-        $result = $this->db->query("SELECT domain_id FROM $records_table WHERE id=" . $this->db->quote($id, 'integer'));
-        $r = $result->fetch();
+        $stmt = $this->db->prepare("SELECT domain_id FROM $records_table WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $r = $stmt->fetch();
         return $r["domain_id"] ?? 0;
     }
 
@@ -229,8 +238,9 @@ class RecordRepository implements RecordRepositoryInterface
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
 
-        $query = "SELECT COUNT(id) FROM $records_table WHERE name = " . $this->db->quote($name, 'text');
-        $count = $this->db->queryOne($query);
+        $stmt = $this->db->prepare("SELECT COUNT(id) FROM $records_table WHERE name = :name");
+        $stmt->execute([':name' => $name]);
+        $count = $stmt->fetchColumn();
         return $count > 0;
     }
 
@@ -274,14 +284,42 @@ class RecordRepository implements RecordRepositoryInterface
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
 
-        $query = "SELECT COUNT(*) FROM $records_table 
-                  WHERE domain_id = " . $this->db->quote($domain_id, 'integer') . " 
-                  AND name = " . $this->db->quote($name, 'text') . " 
-                  AND type = " . $this->db->quote($type, 'text') . " 
-                  AND content = " . $this->db->quote($content, 'text');
+        $stmt = $this->db->prepare("SELECT COUNT(*) FROM $records_table 
+                  WHERE domain_id = :domain_id 
+                  AND name = :name 
+                  AND type = :type 
+                  AND content = :content");
+        $stmt->execute([
+            ':domain_id' => $domain_id,
+            ':name' => $name,
+            ':type' => $type,
+            ':content' => $content
+        ]);
+        return (int)$stmt->fetchColumn() > 0;
+    }
 
-        $response = $this->db->query($query);
-        return (int)$response->fetchColumn() > 0;
+    /**
+     * Check if any PTR record exists for a given reverse domain name
+     *
+     * @param int $domain_id Domain ID
+     * @param string $name Reverse domain name (e.g., "1.1.168.192.in-addr.arpa")
+     *
+     * @return bool True if any PTR record exists for this name
+     */
+    public function hasPtrRecord(int $domain_id, string $name): bool
+    {
+        $pdns_db_name = $this->config->get('database', 'pdns_name');
+        $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
+
+        $stmt = $this->db->prepare("SELECT COUNT(*) FROM $records_table 
+                  WHERE domain_id = :domain_id 
+                  AND name = :name 
+                  AND type = 'PTR'");
+        $stmt->execute([
+            ':domain_id' => $domain_id,
+            ':name' => $name
+        ]);
+        return (int)$stmt->fetchColumn() > 0;
     }
 
     /**
@@ -296,9 +334,247 @@ class RecordRepository implements RecordRepositoryInterface
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
 
-        $query = "SELECT content FROM $records_table where TYPE = " . $this->db->quote('SOA', 'text') . " and domain_id = " . $this->db->quote($zid, 'integer');
-        $rr_soa = $this->db->queryOne($query);
+        $stmt = $this->db->prepare("SELECT content FROM $records_table WHERE type = :type AND domain_id = :domain_id");
+        $stmt->execute([
+            ':type' => 'SOA',
+            ':domain_id' => $zid
+        ]);
+        $rr_soa = $stmt->fetchColumn();
         $rr_soa_fields = explode(" ", $rr_soa);
         return $rr_soa_fields[2] ?? '';
+    }
+
+    /**
+     * Get filtered records from a domain with search capabilities
+     *
+     * @param int $zone_id The zone ID
+     * @param int $row_start Starting row for pagination
+     * @param int $row_amount Number of rows per page
+     * @param string $sort_by Column to sort by
+     * @param string $sort_direction Sort direction (ASC or DESC)
+     * @param bool $include_comments Whether to include comments
+     * @param string $search_term Optional search term to filter by name or content
+     * @param string $type_filter Optional record type filter
+     * @param string $content_filter Optional content filter
+     * @return array Array of filtered records
+     */
+    public function getFilteredRecords(
+        int $zone_id,
+        int $row_start,
+        int $row_amount,
+        string $sort_by,
+        string $sort_direction,
+        bool $include_comments,
+        string $search_term = '',
+        string $type_filter = '',
+        string $content_filter = ''
+    ): array {
+        $pdns_db_name = $this->config->get('database', 'pdns_name');
+        $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
+        $comments_table = $pdns_db_name ? $pdns_db_name . '.comments' : 'comments';
+
+        // Prepare query parameters
+        $params = [':zone_id' => $zone_id];
+
+        // Apply search term to both name and content
+        $search_condition = '';
+        if (!empty($search_term)) {
+            // If search term doesn't already have wildcards, add them
+            if (strpos($search_term, '%') === false) {
+                $search_term = '%' . $search_term . '%';
+            }
+            $search_condition = " AND ($records_table.name LIKE :search_term1 OR $records_table.content LIKE :search_term2)";
+            $params[':search_term1'] = $search_term;
+            $params[':search_term2'] = $search_term;
+        }
+
+        // Apply type filter
+        $type_condition = '';
+        if (!empty($type_filter)) {
+            $type_condition = " AND $records_table.type = :type_filter";
+            $params[':type_filter'] = $type_filter;
+        }
+
+        // Apply content filter
+        $content_condition = '';
+        if (!empty($content_filter)) {
+            // If content filter doesn't already have wildcards, add them
+            if (strpos($content_filter, '%') === false) {
+                $content_filter = '%' . $content_filter . '%';
+            }
+            $content_condition = " AND $records_table.content LIKE :content_filter";
+            $params[':content_filter'] = $content_filter;
+        }
+
+        // Base query
+        $query = "SELECT $records_table.id, $records_table.domain_id, $records_table.name, $records_table.type, 
+                 $records_table.content, $records_table.ttl, $records_table.prio, $records_table.disabled";
+
+        // Add comment column if needed
+        if ($include_comments) {
+            $query .= ", c.comment";
+        }
+
+        // From and joins
+        $query .= " FROM $records_table";
+        if ($include_comments) {
+            $query .= " LEFT JOIN $comments_table c ON $records_table.domain_id = c.domain_id 
+                      AND $records_table.name = c.name AND $records_table.type = c.type";
+        }
+
+        // Where clause
+        $query .= " WHERE $records_table.domain_id = :zone_id" .
+                 $search_condition . $type_condition . $content_condition;
+
+        // Sorting and limits
+        $query .= " ORDER BY $sort_by $sort_direction LIMIT $row_amount OFFSET $row_start";
+
+        $stmt = $this->db->prepare($query);
+        $stmt->execute($params);
+        $records = [];
+
+        while ($record = $stmt->fetch()) {
+            $records[] = $record;
+        }
+
+        return $records;
+    }
+
+    /**
+     * Get count of filtered records
+     *
+     * @param int $zone_id The zone ID
+     * @param bool $include_comments Whether to include comments in the search
+     * @param string $search_term Optional search term to filter by name or content
+     * @param string $type_filter Optional record type filter
+     * @param string $content_filter Optional content filter
+     * @return int Number of filtered records
+     */
+    public function getFilteredRecordCount(
+        int $zone_id,
+        bool $include_comments,
+        string $search_term = '',
+        string $type_filter = '',
+        string $content_filter = ''
+    ): int {
+        $pdns_db_name = $this->config->get('database', 'pdns_name');
+        $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
+
+        // Prepare query parameters
+        $params = [':zone_id' => $zone_id];
+
+        // Apply search term to both name and content
+        $search_condition = '';
+        if (!empty($search_term)) {
+            // If search term doesn't already have wildcards, add them
+            if (strpos($search_term, '%') === false) {
+                $search_term = '%' . $search_term . '%';
+            }
+            $search_condition = " AND ($records_table.name LIKE :search_term1 OR $records_table.content LIKE :search_term2)";
+            $params[':search_term1'] = $search_term;
+            $params[':search_term2'] = $search_term;
+        }
+
+        // Apply type filter
+        $type_condition = '';
+        if (!empty($type_filter)) {
+            $type_condition = " AND $records_table.type = :type_filter";
+            $params[':type_filter'] = $type_filter;
+        }
+
+        // Apply content filter
+        $content_condition = '';
+        if (!empty($content_filter)) {
+            // If content filter doesn't already have wildcards, add them
+            if (strpos($content_filter, '%') === false) {
+                $content_filter = '%' . $content_filter . '%';
+            }
+            $content_condition = " AND $records_table.content LIKE :content_filter";
+            $params[':content_filter'] = $content_filter;
+        }
+
+        // Create the query
+        $query = "SELECT COUNT(*) FROM $records_table WHERE domain_id = :zone_id";
+
+        // Add filter conditions
+        $query .= $search_condition . $type_condition . $content_condition;
+
+        // Execute and return result
+        $stmt = $this->db->prepare($query);
+        $stmt->execute($params);
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * Get the ID of a newly created record
+     *
+     * @param int $domainId Domain ID
+     * @param string $name Record name
+     * @param string $type Record type
+     * @param string $content Record content
+     * @return int|null Record ID or null if not found
+     */
+    public function getNewRecordId(int $domainId, string $name, string $type, string $content): ?int
+    {
+        $pdns_db_name = $this->config->get('database', 'pdns_name');
+        $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
+
+        $query = "SELECT id FROM $records_table
+                 WHERE domain_id = :domain_id
+                 AND name = :name
+                 AND type = :type
+                 AND content = :content
+                 ORDER BY id DESC LIMIT 1";
+
+        $stmt = $this->db->prepare($query);
+        $stmt->execute([
+            ':domain_id' => $domainId,
+            ':name' => strtolower($name),
+            ':type' => $type,
+            ':content' => $content
+        ]);
+
+        $result = $stmt->fetchColumn();
+        return $result ? (int)$result : null;
+    }
+
+    public function getRecordsByDomainId(int $domainId, ?string $recordType = null): array
+    {
+        $pdns_db_name = $this->config->get('database', 'pdns_name');
+        $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
+
+        $query = "SELECT id, domain_id, name, type, content, ttl, prio, disabled, ordername, auth
+                  FROM $records_table
+                  WHERE domain_id = :domain_id";
+
+        $params = [':domain_id' => $domainId];
+
+        if ($recordType !== null) {
+            $query .= " AND type = :type";
+            $params[':type'] = $recordType;
+        }
+
+        $query .= " ORDER BY type, name";
+
+        $stmt = $this->db->prepare($query);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function getRecordById(int $recordId): ?array
+    {
+        $pdns_db_name = $this->config->get('database', 'pdns_name');
+        $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
+
+        $query = "SELECT id, domain_id, name, type, content, ttl, prio, disabled, ordername, auth
+                  FROM $records_table
+                  WHERE id = :id";
+
+        $stmt = $this->db->prepare($query);
+        $stmt->execute([':id' => $recordId]);
+
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $result ?: null;
     }
 }

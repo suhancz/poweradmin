@@ -24,7 +24,7 @@ namespace unit\Dns;
 
 use Poweradmin\Domain\Service\DnsValidation\SOARecordValidator;
 use Poweradmin\Infrastructure\Configuration\ConfigurationManager;
-use Poweradmin\Infrastructure\Database\PDOLayer;
+use Poweradmin\Infrastructure\Database\PDOCommon;
 use PHPUnit\Framework\TestCase;
 
 class SOARecordValidatorTest extends TestCase
@@ -35,12 +35,13 @@ class SOARecordValidatorTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->dbMock = $this->createMock(PDOLayer::class);
+        $this->dbMock = $this->createMock(PDOCommon::class);
         $this->configMock = $this->createMock(ConfigurationManager::class);
 
         // Configure the database mock for Validator class queries
-        $this->dbMock->method('queryOne')
-            ->willReturn(null); // For simplicity, assume validation passes
+        $stmtMock = $this->createMock(\PDOStatement::class);
+        $stmtMock->method('fetch')->willReturn(false); // For simplicity, assume validation passes
+        $this->dbMock->method('query')->willReturn($stmtMock);
 
         // Configure the quote method to handle SQL queries
         $this->dbMock->method('quote')

@@ -42,16 +42,22 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 
 abstract class PublicApiController extends AbstractApiController
 {
+    protected array $pathParameters;
+
     /**
      * PublicApiController constructor
      *
      * @param array $requestParams The request parameters
+     * @param array $pathParameters Optional path parameters for RESTful routes
      */
-    public function __construct(array $requestParams)
+    public function __construct(array $requestParams, array $pathParameters = [])
     {
         // Call parent constructor with authentication disabled
         // We will handle authentication ourselves in this controller
         parent::__construct($requestParams, false);
+
+        // Store path parameters for use by child classes
+        $this->pathParameters = $pathParameters;
 
         // Authenticate the API request using API key or HTTP Basic auth
         $this->authenticateApiRequest();
@@ -82,6 +88,7 @@ abstract class PublicApiController extends AbstractApiController
             'db_collation' => $dbConfig['collation'] ?? '',
             'db_type' => $dbConfig['type'] ?? '',
             'db_file' => $dbConfig['file'] ?? '',
+            'db_debug' => $dbConfig['debug'] ?? false,
         ];
 
         // Create the database connection

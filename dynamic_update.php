@@ -28,6 +28,7 @@ $credentials = [
     'db_collation' => $config->get('database', 'collation'),
     'db_type' => $db_type,
     'db_file' => $config->get('database', 'file'),
+    'db_debug' => $config->get('database', 'debug'),
 ];
 
 $databaseConnection = new PDODatabaseConnection();
@@ -49,8 +50,8 @@ if (!isset($auth_username)) {
     return DynamicDnsHelper::statusExit('badauth');
 }
 
-$username = DynamicDnsHelper::safe($db, $db_type, $auth_username);
-$hostname = DynamicDnsHelper::safe($db, $db_type, $_REQUEST['hostname']);
+$username = $auth_username;
+$hostname = $_REQUEST['hostname'];
 
 // === Dynamic IP handling starts here ===
 
@@ -79,8 +80,8 @@ if (!strlen($hostname)) {
 
 // Parse and validate comma-separated IP lists
 $dualstack_update = isset($_REQUEST['dualstack_update']) && $_REQUEST['dualstack_update'] === '1';
-$ip_v4_input = DynamicDnsHelper::safe($db, $db_type, $given_ip);
-$ip_v6_input = DynamicDnsHelper::safe($db, $db_type, $given_ip6);
+$ip_v4_input = $given_ip;
+$ip_v6_input = $given_ip6;
 
 $ip_v4_list = DynamicDnsHelper::extractValidIps($ip_v4_input, RecordType::A);
 $ip_v6_list = DynamicDnsHelper::extractValidIps($ip_v6_input, RecordType::AAAA);

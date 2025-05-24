@@ -22,10 +22,11 @@
 
 namespace unit\Dns;
 
+use PHPUnit\Framework\MockObject\MockObject;
 use Poweradmin\Domain\Service\DnsValidation\CNAMERecordValidator;
 use Poweradmin\Domain\Service\DnsValidation\DnsCommonValidator;
 use Poweradmin\Infrastructure\Configuration\ConfigurationManager;
-use Poweradmin\Infrastructure\Database\PDOLayer;
+use Poweradmin\Infrastructure\Database\PDOCommon;
 use TestHelpers\BaseDnsTest;
 use ReflectionClass;
 
@@ -37,27 +38,25 @@ class CnameValidationTest extends BaseDnsTest
     public function testValidateCnameName()
     {
         // Create CNAMERecordValidator instance
+        /** @var MockObject&ConfigurationManager $configMock */
         $configMock = $this->createMock(ConfigurationManager::class);
-        $dbMock = $this->createMock(PDOLayer::class);
+        /** @var MockObject&PDOCommon $dbMock */
+        $dbMock = $this->createMock(PDOCommon::class);
 
-        // Setup mock database responses
-        $dbMock->expects($this->atLeastOnce())
-            ->method('queryOne')
-            ->willReturnCallback(function ($query) {
-                if (strpos($query, "'invalid.cname.target'") !== false) {
-                    return ['id' => 1];  // MX or NS record exists
-                }
-                return false;  // No conflicting records
+        // Track which test case we're in for different return values
+        $stmtMock = $this->createMock(\PDOStatement::class);
+        $stmtMock->method('execute')->willReturn(true);
+        $callCount = 0;
+        $stmtMock->method('fetchColumn')
+            ->willReturnCallback(function () use (&$callCount) {
+                $callCount++;
+                // First call: valid case (no conflicts)
+                // Second call: invalid case (conflict found)
+                return $callCount === 1 ? false : 1;
             });
 
-        // Setup quote method mock
-        $dbMock->method('quote')
-            ->willReturnCallback(function ($value, $type = null) {
-                if ($type === 'integer') {
-                    return (string)$value;
-                }
-                return "'$value'";
-            });
+        $dbMock->method('prepare')
+            ->willReturn($stmtMock);
 
         $validator = new CNAMERecordValidator($configMock, $dbMock);
         $reflection = new ReflectionClass($validator);
@@ -79,27 +78,25 @@ class CnameValidationTest extends BaseDnsTest
     public function testValidateCnameExistence()
     {
         // Create CNAMERecordValidator instance
+        /** @var MockObject&ConfigurationManager $configMock */
         $configMock = $this->createMock(ConfigurationManager::class);
-        $dbMock = $this->createMock(PDOLayer::class);
+        /** @var MockObject&PDOCommon $dbMock */
+        $dbMock = $this->createMock(PDOCommon::class);
 
-        // Setup mock database responses before creating validator
-        $dbMock->expects($this->atLeastOnce())
-            ->method('queryOne')
-            ->willReturnCallback(function ($query) {
-                if (strpos($query, 'existing.cname.example.com') !== false) {
-                    return ['id' => 1];  // Record exists
-                }
-                return false;  // No record found
-            });
+        // Setup mock prepared statement responses
+        $stmtMock = $this->createMock(\PDOStatement::class);
+        $stmtMock->method('execute')->willReturn(true);
+        $callCount = 0;
+        $stmtMock->method('fetchColumn')
+        ->willReturnCallback(function () use (&$callCount) {
+            $callCount++;
+            // First two calls: valid cases (no existing CNAME)
+            // Third call: invalid case (existing CNAME found)
+            return $callCount <= 2 ? false : 1;
+        });
 
-        // Setup quote method mock
-        $dbMock->method('quote')
-            ->willReturnCallback(function ($value, $type = null) {
-                if ($type === 'integer') {
-                    return (string)$value; // Convert to string for integer values
-                }
-                return "'$value'";
-            });
+        $dbMock->method('prepare')
+        ->willReturn($stmtMock);
 
         // Create validator after setting up mocks
         $validator = new CNAMERecordValidator($configMock, $dbMock);
@@ -130,24 +127,19 @@ class CnameValidationTest extends BaseDnsTest
     public function testValidateCnameUnique()
     {
         // Create CNAMERecordValidator instance
+        /** @var MockObject&ConfigurationManager $configMock */
         $configMock = $this->createMock(ConfigurationManager::class);
-        $dbMock = $this->createMock(PDOLayer::class);
+        /** @var MockObject&PDOCommon $dbMock */
+        $dbMock = $this->createMock(PDOCommon::class);
 
-        // Setup mock database responses
-        $dbMock->expects($this->atLeastOnce())
-            ->method('queryOne')
-            ->willReturnCallback(function ($query) {
-                return false;  // No conflicting records found for valid cases
-            });
+        // Setup mock prepared statement responses
+        $stmtMock = $this->createMock(\PDOStatement::class);
+        $stmtMock->method('execute')->willReturn(true);
+        $stmtMock->method('fetchColumn')
+        ->willReturn(false); // No conflicting records found for valid cases
 
-        // Setup quote method mock
-        $dbMock->method('quote')
-            ->willReturnCallback(function ($value, $type = null) {
-                if ($type === 'integer') {
-                    return (string)$value;
-                }
-                return "'$value'";
-            });
+        $dbMock->method('prepare')
+        ->willReturn($stmtMock);
 
         $validator = new CNAMERecordValidator($configMock, $dbMock);
         $reflection = new ReflectionClass($validator);
@@ -172,20 +164,15 @@ class CnameValidationTest extends BaseDnsTest
         // Create mocks that will be used for both test cases
         $configMock = $this->createMock(ConfigurationManager::class);
         $configMock->method('get')
-            ->willReturn('pdns');
+        ->willReturn('pdns');
 
         // Test valid case - target is not a CNAME
-        $dbMock1 = $this->createMock(PDOLayer::class);
-        $dbMock1->method('quote')
-            ->willReturnCallback(function ($value, $type) {
-                if ($type === 'text') {
-                    return "'$value'";
-                }
-                return $value;
-            });
-        $dbMock1->expects($this->once())
-            ->method('queryOne')
-            ->willReturn(false);
+        /** @var MockObject&PDOCommon $dbMock1 */
+        $dbMock1 = $this->createMock(PDOCommon::class);
+        $stmtMock1 = $this->createMock(\PDOStatement::class);
+        $stmtMock1->method('execute')->willReturn(true);
+        $stmtMock1->method('fetchColumn')->willReturn(false); // No CNAME found
+        $dbMock1->method('prepare')->willReturn($stmtMock1);
 
         $validator1 = new DnsCommonValidator($dbMock1, $configMock);
         $result1 = $validator1->validateNonAliasTarget('valid.example.com');
@@ -193,17 +180,12 @@ class CnameValidationTest extends BaseDnsTest
         $this->assertTrue($result1->getData());
 
         // Test invalid case - target is a CNAME
-        $dbMock2 = $this->createMock(PDOLayer::class);
-        $dbMock2->method('quote')
-            ->willReturnCallback(function ($value, $type) {
-                if ($type === 'text') {
-                    return "'$value'";
-                }
-                return $value;
-            });
-        $dbMock2->expects($this->once())
-            ->method('queryOne')
-            ->willReturn(['id' => 1]);
+        /** @var MockObject&PDOCommon $dbMock2 */
+        $dbMock2 = $this->createMock(PDOCommon::class);
+        $stmtMock2 = $this->createMock(\PDOStatement::class);
+        $stmtMock2->method('execute')->willReturn(true);
+        $stmtMock2->method('fetchColumn')->willReturn(1); // CNAME found
+        $dbMock2->method('prepare')->willReturn($stmtMock2);
 
         $validator2 = new DnsCommonValidator($dbMock2, $configMock);
         $result2 = $validator2->validateNonAliasTarget('alias.example.com');
@@ -214,8 +196,10 @@ class CnameValidationTest extends BaseDnsTest
     public function testValidateNotEmptyCnameRR()
     {
         // Create CNAMERecordValidator instance
+        /** @var MockObject&ConfigurationManager $configMock */
         $configMock = $this->createMock(ConfigurationManager::class);
-        $dbMock = $this->createMock(PDOLayer::class);
+        /** @var MockObject&PDOCommon $dbMock */
+        $dbMock = $this->createMock(PDOCommon::class);
 
         $validator = new CNAMERecordValidator($configMock, $dbMock);
         $reflection = new ReflectionClass($validator);

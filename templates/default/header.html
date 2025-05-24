@@ -59,6 +59,7 @@
                         {% if perm_view_zone_own or perm_view_zone_other %}
                         <li><a class="dropdown-item {{ current_page == 'list_forward_zones' ? 'active' : '' }}" href="index.php?page=list_forward_zones">{% trans %}Forward zones{% endtrans %}</a></li>
                         <li><a class="dropdown-item {{ current_page == 'list_reverse_zones' ? 'active' : '' }}" href="index.php?page=list_reverse_zones">{% trans %}Reverse zones{% endtrans %}</a></li>
+                        <li><hr class="dropdown-divider"></li>
                         {% endif %}
                         {% if perm_zone_master_add %}
                         <li><a class="dropdown-item {{ current_page == 'add_zone_master' ? 'active' : '' }}"
@@ -87,9 +88,10 @@
                     </ul>
                 </li>
                 {% endif %}
+                {% if perm_view_others or perm_edit_others or perm_add_new or perm_is_godlike %}
                 <li class="p-1">
-                    <a href="index.php?page=users" class="nav-link text-{{ current_page in ['users', 'add_user', 'edit_user', 'list_perm_templ', 'add_perm_templ', 'edit_perm_templ', 'list_log_users'] ? 'primary' : 'secondary' }}"><i class="bi bi-people"></i></a>
-                    <a class="text-{{ current_page in ['users', 'add_user', 'edit_user', 'list_perm_templ', 'add_perm_templ', 'edit_perm_templ', 'list_log_users'] ? 'primary' : 'secondary' }} text-decoration-none dropdown-toggle" data-bs-toggle="dropdown"
+                    <a href="index.php?page=users" class="nav-link text-{{ current_page in ['users', 'add_user', 'list_perm_templ', 'add_perm_templ', 'edit_perm_templ', 'list_log_users'] or (current_page == 'edit_user' and request.id != session_userid) ? 'primary' : 'secondary' }}"><i class="bi bi-people"></i></a>
+                    <a class="text-{{ current_page in ['users', 'add_user', 'list_perm_templ', 'add_perm_templ', 'edit_perm_templ', 'list_log_users'] or (current_page == 'edit_user' and request.id != session_userid) ? 'primary' : 'secondary' }} text-decoration-none dropdown-toggle" data-bs-toggle="dropdown"
                        href="#"
                        role="button">{% trans %}Users{% endtrans %}</a>
                     <ul class="dropdown-menu">
@@ -115,6 +117,7 @@
                         {% endif %}
                     </ul>
                 </li>
+                {% endif %}
                 {% if perm_zone_master_add %}
                 <li class="p-1">
                     <a href="index.php?page=list_zone_templ" class="nav-link text-{{ current_page in ['list_zone_templ', 'add_zone_templ', 'edit_zone_templ', 'list_template_zones'] ? 'primary' : 'secondary' }} text-center"><i
@@ -125,15 +128,17 @@
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item {{ current_page == 'list_zone_templ' ? 'active' : '' }}"
                                href="index.php?page=list_zone_templ">{% trans %}List zone templates{% endtrans %}</a></li>
+                        {% if perm_zone_templ_add %}
                         <li><a class="dropdown-item {{ current_page == 'add_zone_templ' ? 'active' : '' }}"
                                href="index.php?page=add_zone_templ">{% trans %}Add zone template{% endtrans %}</a></li>
+                        {% endif %}
                     </ul>
                 </li>
                 {% endif %}
-                {% if ((not whois_restrict_to_admin or perm_is_godlike) and whois_enabled) or ((not rdap_restrict_to_admin or perm_is_godlike) and rdap_enabled) or (perm_is_godlike and api_enabled) %}
+                {% if ((not whois_restrict_to_admin or perm_is_godlike) and whois_enabled) or ((not rdap_restrict_to_admin or perm_is_godlike) and rdap_enabled) or (perm_is_godlike and api_enabled) or (perm_is_godlike and enable_consistency_checks) %}
                 <li class="p-1">
-                    <a href="#" class="nav-link text-{{ current_page in ['whois', 'rdap', 'api_keys'] ? 'primary' : 'secondary' }} text-center"><i class="bi bi-tools"></i></a>
-                    <a class="text-{{ current_page in ['whois', 'rdap', 'api_keys'] ? 'primary' : 'secondary' }} text-decoration-none dropdown-toggle" data-bs-toggle="dropdown"
+                    <a href="#" class="nav-link text-{{ current_page in ['whois', 'rdap', 'api_keys', 'database_consistency'] ? 'primary' : 'secondary' }} text-center"><i class="bi bi-tools"></i></a>
+                    <a class="text-{{ current_page in ['whois', 'rdap', 'api_keys', 'database_consistency'] ? 'primary' : 'secondary' }} text-decoration-none dropdown-toggle" data-bs-toggle="dropdown"
                         href="#"
                         role="button">{% trans %}Tools{% endtrans %}</a>
                     <ul class="dropdown-menu">
@@ -152,15 +157,24 @@
                             <i class="bi bi-key-fill me-2"></i>{% trans %}API Keys{% endtrans %}
                         </a></li>
                         {% endif %}
+                        {% if perm_is_godlike and enable_consistency_checks %}
+                        <li><a class="dropdown-item {{ current_page == 'database_consistency' ? 'active' : '' }}" href="index.php?page=database_consistency">
+                            <i class="bi bi-database-check me-2"></i>{% trans %}Database Consistency{% endtrans %}
+                        </a></li>
+                        {% endif %}
                     </ul>
                 </li>
                 {% endif %}
                 <li class="p-1">
-                    <a href="#" class="nav-link text-{{ current_page in ['change_password', 'mfa_setup', 'logout'] ? 'primary' : 'secondary' }}"><i class="bi bi-person-circle"></i></a>
-                    <a class="text-{{ current_page in ['change_password', 'mfa_setup', 'logout'] ? 'primary' : 'secondary' }} text-decoration-none dropdown-toggle" data-bs-toggle="dropdown"
+                    <a href="#" class="nav-link text-{{ current_page in ['change_password', 'mfa_setup', 'logout'] or (current_page == 'edit_user' and request.id == session_userid) ? 'primary' : 'secondary' }}"><i class="bi bi-person-circle"></i></a>
+                    <a class="text-{{ current_page in ['change_password', 'mfa_setup', 'logout'] or (current_page == 'edit_user' and request.id == session_userid) ? 'primary' : 'secondary' }} text-decoration-none dropdown-toggle" data-bs-toggle="dropdown"
                        href="#"
                        role="button">{% trans %}Account{% endtrans %}</a>
                     <ul class="dropdown-menu">
+                        {% if perm_edit_own %}
+                        <li><a class="dropdown-item {{ current_page == 'edit_user' and request.id == session_userid ? 'active' : '' }}"
+                               href="index.php?page=edit_user&id={{ session_userid }}">{% trans %}Edit profile{% endtrans %}</a></li>
+                        {% endif %}
                         {% if auth_used %}
                         <li><a class="dropdown-item {{ current_page == 'change_password' ? 'active' : '' }}"
                                href="index.php?page=change_password">{% trans %}Change password{% endtrans %}</a></li>

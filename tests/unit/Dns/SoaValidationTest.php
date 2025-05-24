@@ -25,7 +25,7 @@ namespace unit\Dns;
 use TestHelpers\BaseDnsTest;
 use Poweradmin\Domain\Service\DnsValidation\SOARecordValidator;
 use Poweradmin\Infrastructure\Configuration\ConfigurationManager;
-use Poweradmin\Infrastructure\Database\PDOLayer;
+use Poweradmin\Infrastructure\Database\PDOCommon;
 
 /**
  * Tests for SOA record validation
@@ -38,11 +38,13 @@ class SoaValidationTest extends BaseDnsTest
 
     protected function setUp(): void
     {
-        $this->dbMock = $this->createMock(PDOLayer::class);
+        $this->dbMock = $this->createMock(PDOCommon::class);
         $this->configMock = $this->createMock(ConfigurationManager::class);
 
         // Configure the database mock
-        $this->dbMock->method('queryOne')->willReturn(null);
+        $stmtMock = $this->createMock(\PDOStatement::class);
+        $stmtMock->method('fetch')->willReturn(false);
+        $this->dbMock->method('query')->willReturn($stmtMock);
         $this->dbMock->method('quote')
             ->willReturnCallback(function ($value, $type = null) {
                 if ($type === 'text') {

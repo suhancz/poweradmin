@@ -339,6 +339,16 @@ class DatabaseStructureHelper
                         'name' => 'owner',
                         'table' => 'zone_templ',
                         'flags' => 'not_null'
+                    ),
+                    'created_by' => array
+                    (
+                        'notnull' => 0,
+                        'fixed' => 0,
+                        'default' => null,
+                        'type' => 'integer',
+                        'name' => 'created_by',
+                        'table' => 'zone_templ',
+                        'flags' => ''
                     )
                 )
             ),
@@ -702,12 +712,12 @@ class DatabaseStructureHelper
                         'flags' => 'not_null'
                     ),
                     'created_by' => array(
-                        'notnull' => 1,
+                        'notnull' => 0,
                         'unsigned' => 0,
                         'type' => 'integer',
                         'name' => 'created_by',
                         'table' => 'api_keys',
-                        'flags' => 'not_null'
+                        'flags' => ''
                     ),
                     'created_at' => array(
                         'notnull' => 1,
@@ -851,6 +861,144 @@ class DatabaseStructureHelper
                     'fk_user_mfa_users' => array(
                         'table' => 'users',
                         'fields' => array('user_id' => 'id'),
+                        'ondelete' => 'CASCADE'
+                    )
+                )
+            ),
+            array(
+                'table_name' => 'user_preferences',
+                'options' => array('type' => 'innodb'),
+                'fields' => array(
+                    'id' => array(
+                        'notnull' => 1,
+                        'unsigned' => 0,
+                        'default' => 0,
+                        'autoincrement' => 1,
+                        'type' => 'integer',
+                        'name' => 'id',
+                        'table' => 'user_preferences',
+                        'flags' => 'primary_keynot_null'
+                    ),
+                    'user_id' => array(
+                        'notnull' => 1,
+                        'unsigned' => 0,
+                        'type' => 'integer',
+                        'name' => 'user_id',
+                        'table' => 'user_preferences',
+                        'flags' => 'not_null'
+                    ),
+                    'preference_key' => array(
+                        'notnull' => 1,
+                        'length' => 100,
+                        'fixed' => 0,
+                        'type' => 'text',
+                        'name' => 'preference_key',
+                        'table' => 'user_preferences',
+                        'flags' => 'not_null'
+                    ),
+                    'preference_value' => array(
+                        'notnull' => 0,
+                        'type' => 'text',
+                        'name' => 'preference_value',
+                        'table' => 'user_preferences',
+                        'flags' => ''
+                    )
+                ),
+                'indexes' => array(
+                    'idx_user_preferences_user_key' => array('user_id', 'preference_key'),
+                    'idx_user_preferences_user_id' => array('user_id')
+                ),
+                'foreign_keys' => array(
+                    'fk_user_preferences_users' => array(
+                        'table' => 'users',
+                        'fields' => array('user_id' => 'id'),
+                        'ondelete' => 'CASCADE'
+                    )
+                )
+            ),
+            array(
+                'table_name' => 'zone_template_sync',
+                'options' => array('type' => 'innodb'),
+                'fields' => array(
+                    'id' => array(
+                        'type' => 'integer',
+                        'notnull' => 1,
+                        'unsigned' => 0,
+                        'autoincrement' => 1,
+                        'name' => 'id',
+                        'table' => 'zone_template_sync',
+                        'flags' => 'primary_keynot_null'
+                    ),
+                    'zone_id' => array(
+                        'type' => 'integer',
+                        'notnull' => 1,
+                        'length' => 11,
+                        'name' => 'zone_id',
+                        'table' => 'zone_template_sync',
+                        'flags' => 'not_null'
+                    ),
+                    'zone_templ_id' => array(
+                        'type' => 'integer',
+                        'notnull' => 1,
+                        'length' => 11,
+                        'name' => 'zone_templ_id',
+                        'table' => 'zone_template_sync',
+                        'flags' => 'not_null'
+                    ),
+                    'last_synced' => array(
+                        'type' => 'timestamp',
+                        'notnull' => 0,
+                        'name' => 'last_synced',
+                        'table' => 'zone_template_sync',
+                        'flags' => ''
+                    ),
+                    'template_last_modified' => array(
+                        'type' => 'timestamp',
+                        'notnull' => 1,
+                        'default' => 'CURRENT_TIMESTAMP',
+                        'name' => 'template_last_modified',
+                        'table' => 'zone_template_sync',
+                        'flags' => 'not_null'
+                    ),
+                    'needs_sync' => array(
+                        'type' => 'boolean',
+                        'notnull' => 1,
+                        'default' => 0,
+                        'name' => 'needs_sync',
+                        'table' => 'zone_template_sync',
+                        'flags' => 'not_null'
+                    ),
+                    'created_at' => array(
+                        'type' => 'timestamp',
+                        'notnull' => 1,
+                        'default' => 'CURRENT_TIMESTAMP',
+                        'name' => 'created_at',
+                        'table' => 'zone_template_sync',
+                        'flags' => 'not_null'
+                    ),
+                    'updated_at' => array(
+                        'type' => 'timestamp',
+                        'notnull' => 1,
+                        'default' => 'CURRENT_TIMESTAMP',
+                        'name' => 'updated_at',
+                        'table' => 'zone_template_sync',
+                        'flags' => 'not_null'
+                    )
+                ),
+                'indexes' => array(
+                    'idx_zone_template_unique' => array('zone_id', 'zone_templ_id'),
+                    'idx_zone_templ_id' => array('zone_templ_id'),
+                    'idx_needs_sync' => array('needs_sync')
+                ),
+                'foreign_keys' => array(
+                    'fk_zone_template_sync_zone' => array(
+                        'table' => 'domains',
+                        'fields' => array('zone_id' => 'id'),
+                        'ondelete' => 'CASCADE'
+                    ),
+                    'fk_zone_template_sync_templ' => array(
+                        'table' => 'zone_templ',
+                        'fields' => array('zone_templ_id' => 'id'),
                         'ondelete' => 'CASCADE'
                     )
                 )

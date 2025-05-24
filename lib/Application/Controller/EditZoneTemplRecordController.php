@@ -35,16 +35,20 @@ use Poweradmin\BaseController;
 use Poweradmin\Domain\Model\UserManager;
 use Poweradmin\Domain\Model\ZoneTemplate;
 use Poweradmin\Domain\Service\RecordTypeService;
+use Poweradmin\Domain\Service\UserContextService;
+use Poweradmin\Domain\Service\ZoneTemplateSyncService;
 use Symfony\Component\Validator\Constraints as Assert;
 
 class EditZoneTemplRecordController extends BaseController
 {
     private RecordTypeService $recordTypeService;
+    private UserContextService $userContext;
 
     public function __construct(array $request)
     {
         parent::__construct($request);
         $this->recordTypeService = new RecordTypeService($this->getConfig());
+        $this->userContext = new UserContextService();
     }
 
     public function run(): void
@@ -66,13 +70,14 @@ class EditZoneTemplRecordController extends BaseController
             $this->showFirstValidationError($_GET);
         }
 
-        $record_id = htmlspecialchars($_GET['id']);
-        $zone_templ_id = htmlspecialchars($_GET['zone_templ_id']);
+        $record_id = (int)$_GET['id'];
+        $zone_templ_id = (int)$_GET['zone_templ_id'];
 
-        $owner = ZoneTemplate::getZoneTemplIsOwner($this->db, $zone_templ_id, $_SESSION['userid']);
+        $userId = $this->userContext->getLoggedInUserId();
+        $owner = ZoneTemplate::getZoneTemplIsOwner($this->db, $zone_templ_id, $userId);
         $perm_godlike = UserManager::verifyPermission($this->db, 'user_is_ueberuser');
-        $perm_master_add = UserManager::verifyPermission($this->db, 'zone_master_add');
-        $this->checkCondition(!($perm_godlike || $perm_master_add && $owner), _("You do not have the permission to delete zone templates."));
+        $perm_templ_edit = UserManager::verifyPermission($this->db, 'zone_templ_edit');
+        $this->checkCondition(!($perm_godlike || $perm_templ_edit && $owner), _("You do not have the permission to edit zone template records."));
 
         if ($this->isPost()) {
             $this->validateCsrfToken();
@@ -82,9 +87,15 @@ class EditZoneTemplRecordController extends BaseController
         $this->showZoneTemplateRecordForm($record_id, $zone_templ_id);
     }
 
-    public function showZoneTemplateRecordForm(string $record_id, string $zone_templ_id): void
+    public function showZoneTemplateRecordForm(int $record_id, int $zone_templ_id): void
     {
         $record = ZoneTemplate::getZoneTemplRecordFromId($this->db, $record_id);
+
+        // Get count of zones using this template
+        $zoneTemplate = new ZoneTemplate($this->db, $this->getConfig());
+        $userId = $this->userContext->getLoggedInUserId();
+        $linked_zones = $zoneTemplate->getListZoneUseTempl($zone_templ_id, $userId);
+        $zones_linked_count = count($linked_zones);
 
         $this->render('edit_zone_templ_record.html', [
             'record' => $record,
@@ -92,10 +103,11 @@ class EditZoneTemplRecordController extends BaseController
             'record_id' => $record_id,
             'templ_details' => ZoneTemplate::getZoneTemplDetails($this->db, $zone_templ_id),
             'record_types' => $this->recordTypeService->getAllTypes(),
+            'zones_linked_count' => $zones_linked_count,
         ]);
     }
 
-    public function updateZoneTemplateRecord(string $zone_templ_id): void
+    public function updateZoneTemplateRecord(int $zone_templ_id): void
     {
         $constraints = [
             'name' => [
@@ -126,6 +138,10 @@ class EditZoneTemplRecordController extends BaseController
         $template = new ZoneTemplate($this->db, $this->getConfig());
 
         if ($template->editZoneTemplRecord($_POST)) {
+            // Mark template as modified to track sync status
+            $syncService = new ZoneTemplateSyncService($this->db, $this->getConfig());
+            $syncService->markTemplateAsModified($zone_templ_id);
+
             $this->setMessage('edit_zone_templ', 'success', _('Zone template has been updated successfully.'));
             $this->redirect('index.php', ['page' => 'edit_zone_templ', 'id' => $zone_templ_id]);
         }

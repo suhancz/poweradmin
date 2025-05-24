@@ -23,6 +23,7 @@
 namespace Poweradmin\Domain\Service;
 
 use Exception;
+use Poweradmin\Domain\Model\Constants;
 use Poweradmin\Domain\Repository\DomainRepository;
 use Poweradmin\Domain\Repository\RecordRepository;
 use Poweradmin\Domain\Service\Dns\DomainManager;
@@ -32,7 +33,7 @@ use Poweradmin\Domain\Service\Dns\SupermasterManager;
 use Poweradmin\Domain\Utility\DomainUtility;
 use Poweradmin\Infrastructure\Service\DnsServiceFactory;
 use Poweradmin\Infrastructure\Configuration\ConfigurationManager;
-use Poweradmin\Infrastructure\Database\PDOLayer;
+use Poweradmin\Infrastructure\Database\PDOCommon;
 
 /**
  * DNS record functions
@@ -45,19 +46,25 @@ use Poweradmin\Infrastructure\Database\PDOLayer;
  */
 class DnsRecord
 {
-    private PDOLayer $db;
+    private PDOCommon $db;
     private ConfigurationManager $config;
     private DnsRecordValidationServiceInterface $validationService;
 
     // New service instances
-    private SOARecordManager $soaRecordManager;
-    private DomainRepository $domainRepository;
-    private RecordRepository $recordRepository;
-    private RecordManager $recordManager;
-    private DomainManager $domainManager;
-    private SupermasterManager $supermasterManager;
+    /** @var SOARecordManager */
+    private $soaRecordManager;
+    /** @var DomainRepository */
+    private $domainRepository;
+    /** @var RecordRepository */
+    private $recordRepository;
+    /** @var RecordManager */
+    private $recordManager;
+    /** @var DomainManager */
+    private $domainManager;
+    /** @var SupermasterManager */
+    private $supermasterManager;
 
-    public function __construct(PDOLayer $db, ConfigurationManager $config)
+    public function __construct(PDOCommon $db, ConfigurationManager $config)
     {
         $this->db = $db;
         $this->config = $config;
@@ -406,14 +413,14 @@ class DnsRecord
      *
      * @param int $id Domain ID
      *
-     * @return bool|string Domain name
+     * @return string|null Domain name or null if not found
      */
-    public function getDomainNameById(int $id): bool|string
+    public function getDomainNameById(int $id): ?string
     {
         return $this->domainRepository->getDomainNameById($id);
     }
 
-    public function getDomainIdByName(string $name): bool|int
+    public function getDomainIdByName(string $name): ?int
     {
         return $this->domainRepository->getDomainIdByName($name);
     }
@@ -421,9 +428,9 @@ class DnsRecord
     /** Get zone id from name
      *
      * @param string $zname Zone name
-     * @return bool|int Zone ID
+     * @return int|null Zone ID or null if not found
      */
-    public function getZoneIdFromName(string $zname): bool|int
+    public function getZoneIdFromName(string $zname): ?int
     {
         return $this->domainRepository->getZoneIdFromName($zname);
     }
@@ -530,9 +537,9 @@ class DnsRecord
      * Retrieve all fields of the record and send it back to the function caller.
      *
      * @param int $id Record ID
-     * @return int|array array of record detail, or -1 if nothing found
+     * @return array|null array of record detail, or null if nothing found
      */
-    public function getRecordFromId(int $id): int|array
+    public function getRecordFromId(int $id): ?array
     {
         return $this->recordRepository->getRecordFromId($id);
     }
@@ -543,14 +550,14 @@ class DnsRecord
      *
      * @param int $id Domain ID
      * @param int $rowstart Starting row [default=0]
-     * @param int $rowamount Number of rows to return in this query [default=999999]
+     * @param int $rowamount Number of rows to return in this query [default=9999]
      * @param string $sortby Column to sort by [default='name']
      * @param string $sortDirection Sort direction [default='ASC']
      * @param bool $fetchComments Whether to fetch record comments [default=false]
      *
-     * @return int|array array of record detail, or -1 if nothing found
+     * @return array array of record details (empty array if nothing found)
      */
-    public function getRecordsFromDomainId($db_type, int $id, int $rowstart = 0, int $rowamount = 999999, string $sortby = 'name', string $sortDirection = 'ASC', bool $fetchComments = false): array|int
+    public function getRecordsFromDomainId($db_type, int $id, int $rowstart = 0, int $rowamount = Constants::DEFAULT_MAX_ROWS, string $sortby = 'name', string $sortDirection = 'ASC', bool $fetchComments = false): array
     {
         return $this->recordRepository->getRecordsFromDomainId($db_type, $id, $rowstart, $rowamount, $sortby, $sortDirection, $fetchComments);
     }
@@ -565,16 +572,21 @@ class DnsRecord
     {
         $owners = array();
 
-        $sqlq = "SELECT owner FROM zones WHERE domain_id =" . $db->quote($id, 'integer');
-        $id_owners = $db->query($sqlq);
+        $stmt = $db->prepare("SELECT owner FROM zones WHERE domain_id = ?");
+        $stmt->execute([$id]);
+        $id_owners = $stmt;
         if ($id_owners) {
             while ($r = $id_owners->fetch()) {
-                $result = $db->queryRow("SELECT username, fullname FROM users WHERE id=" . $r['owner']);
-                $owners[] = array(
-                    "id" => $r['owner'],
-                    "fullname" => $result["fullname"],
-                    "username" => $result["username"],
-                );
+                $userStmt = $db->prepare("SELECT username, fullname FROM users WHERE id = ?");
+                $userStmt->execute([$r['owner']]);
+                $result = $userStmt->fetch();
+                if ($result) {
+                    $owners[] = array(
+                        "id" => $r['owner'],
+                        "fullname" => $result["fullname"],
+                        "username" => $result["username"],
+                    );
+                }
             }
         } else {
             return [];
@@ -643,14 +655,16 @@ class DnsRecord
 
     /** Update All Zone Records for Zone ID with Zone Template
      *
+     * @param string $db_type Database type
+     * @param int $dns_ttl Default TTL
      * @param int $zone_id Zone ID to update
      * @param int $zone_template_id Zone Template ID to use for update
      *
-     * @return null
+     * @return void
      */
-    public function updateZoneRecords($db_type, $dns_ttl, int $zone_id, int $zone_template_id)
+    public function updateZoneRecords(string $db_type, int $dns_ttl, int $zone_id, int $zone_template_id): void
     {
-        return $this->domainManager->updateZoneRecords($db_type, $dns_ttl, $zone_id, $zone_template_id);
+        $this->domainManager->updateZoneRecords($db_type, $dns_ttl, $zone_id, $zone_template_id);
     }
 
     /** Delete array of domains

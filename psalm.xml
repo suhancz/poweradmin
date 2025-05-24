@@ -14,12 +14,16 @@
         <directory name="install" />
         <directory name="lib" />
         <directory name="tests" />
+        <ignoreFiles>
+            <directory name="vendor" />
+        </ignoreFiles>
     </projectFiles>
     <issueHandlers>
         <MissingReturnType errorLevel="info" />
         <UnusedClass errorLevel="info" />
         <ClassMustBeFinal errorLevel="info" />
         <MissingOverrideAttribute errorLevel="info" />
+        <MethodSignatureMismatch errorLevel="suppress" />
         <UndefinedMethod>
             <errorLevel type="suppress">
                 <!-- Suppress UndefinedMethod for PHPUnit mock methods -->

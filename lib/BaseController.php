@@ -23,10 +23,14 @@
 namespace Poweradmin;
 
 use Poweradmin\Application\Service\CsrfTokenService;
+use Poweradmin\Application\Service\PaginationService;
 use Poweradmin\Domain\Model\UserManager;
 use Poweradmin\Domain\Service\MfaSessionManager;
+use Poweradmin\Domain\Service\UserContextService;
+use Poweradmin\Domain\Service\UserPreferenceService;
 use Poweradmin\Infrastructure\Configuration\ConfigurationManager;
-use Poweradmin\Infrastructure\Database\PDOLayer;
+use Poweradmin\Infrastructure\Database\PDOCommon;
+use Poweradmin\Infrastructure\Repository\DbUserPreferenceRepository;
 use Poweradmin\Infrastructure\Service\MessageService;
 use Poweradmin\Infrastructure\Service\StyleManager;
 use Symfony\Component\Validator\Constraints as Assert;
@@ -42,13 +46,14 @@ abstract class BaseController
 {
     private AppManager $app;
     private AppInitializer $init;
-    protected PDOLayer $db;
+    protected PDOCommon $db;
     private array $request;
     private ValidatorInterface $validator;
     private array $validationConstraints = [];
     private CsrfTokenService $csrfTokenService;
     protected MessageService $messageService;
     protected ConfigurationManager $config;
+    private UserContextService $userContextService;
 
     /**
      * Abstract method to be implemented by subclasses to run the controller logic.
@@ -74,15 +79,16 @@ abstract class BaseController
         $this->config = ConfigurationManager::getInstance();
         $this->csrfTokenService = new CsrfTokenService();
         $this->messageService = new MessageService();
+        $this->userContextService = new UserContextService();
 
         // If we're in an API context and the user is not authenticated,
         // check for API key authentication (but only for internal API routes)
-        if ($authenticate && !isset($_SESSION['userid']) && $this->isInternalApiRoute()) {
+        if ($authenticate && !$this->userContextService->isAuthenticated() && $this->isInternalApiRoute()) {
             $this->tryApiKeyAuthentication();
         }
 
         // Check for MFA requirement for regular controllers using our centralized manager
-        if ($authenticate && !$this->isApiRequest() && isset($_SESSION['userid'])) {
+        if ($authenticate && !$this->isApiRequest() && $this->userContextService->isAuthenticated()) {
             $currentPage = $request['page'] ?? '';
 
             // Use our centralized MFA session manager to check if verification is required
@@ -105,6 +111,43 @@ abstract class BaseController
     {
         $page = $this->request['page'] ?? '';
         return strpos($page, 'api/') === 0;
+    }
+
+    /**
+     * Checks if the current request expects a JSON response
+     * This is more comprehensive than just checking the route
+     *
+     * @return bool True if this request expects JSON, false otherwise
+     */
+    public static function expectsJson(): bool
+    {
+        // Check if it's an API route
+        $requestUri = $_SERVER['REQUEST_URI'] ?? '';
+        if (str_contains($requestUri, '/api/')) {
+            return true;
+        }
+
+        // Check Accept header
+        $acceptHeader = $_SERVER['HTTP_ACCEPT'] ?? '';
+        if (str_contains($acceptHeader, 'application/json') && !str_contains($acceptHeader, 'text/html')) {
+            return true;
+        }
+
+        // Check if it's an AJAX request
+        if (
+            isset($_SERVER['HTTP_X_REQUESTED_WITH']) &&
+            strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest'
+        ) {
+            return true;
+        }
+
+        // Check Content-Type for JSON requests
+        $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
+        if (str_contains($contentType, 'application/json')) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -292,6 +335,49 @@ abstract class BaseController
     }
 
     /**
+     * Create UserPreferenceService instance
+     *
+     * @return UserPreferenceService
+     */
+    protected function createUserPreferenceService(): UserPreferenceService
+    {
+        $db_type = $this->config->get('database', 'type');
+        $repository = new DbUserPreferenceRepository($this->db, $db_type);
+        return new UserPreferenceService($repository);
+    }
+
+    /**
+     * Create PaginationService with user preferences support
+     *
+     * @return PaginationService
+     */
+    protected function createPaginationService(): PaginationService
+    {
+        $userPreferenceService = $this->createUserPreferenceService();
+        return new PaginationService($userPreferenceService);
+    }
+
+    /**
+     * Get current user ID
+     *
+     * @return int|null
+     */
+    protected function getCurrentUserId(): ?int
+    {
+        return $this->userContextService->getLoggedInUserId();
+    }
+
+    /**
+     * Get the user context service
+     *
+     * @return UserContextService
+     */
+    protected function getUserContextService(): UserContextService
+    {
+        return $this->userContextService;
+    }
+
+    /**
      * Checks if the user has a specific permission and displays an error message if not.
      *
      * @param string $permission The permission to check.
@@ -300,6 +386,17 @@ abstract class BaseController
     public function checkPermission(string $permission, string $errorMessage): void
     {
         if (!UserManager::verifyPermission($this->db, $permission)) {
+            // Check if this request expects JSON
+            if (self::expectsJson()) {
+                header('Content-Type: application/json');
+                http_response_code(403);
+                echo json_encode([
+                    'error' => true,
+                    'message' => $errorMessage
+                ]);
+                exit;
+            }
+
             // Add as system message
             $this->addSystemMessage('error', $errorMessage);
 
@@ -324,6 +421,17 @@ abstract class BaseController
             $error = sprintf('%s (Record: %s)', $error, $recordName);
         }
 
+        // Check if this request expects JSON
+        if (self::expectsJson()) {
+            header('Content-Type: application/json');
+            http_response_code(400);
+            echo json_encode([
+                'error' => true,
+                'message' => $error
+            ]);
+            exit;
+        }
+
         // Add as system message
         $this->addSystemMessage('error', $error);
 
@@ -343,6 +451,17 @@ abstract class BaseController
     {
         $validationErrors = array_values($errors);
         $firstError = reset($validationErrors);
+
+        // Check if this request expects JSON
+        if (self::expectsJson()) {
+            header('Content-Type: application/json');
+            http_response_code(400);
+            echo json_encode([
+                'error' => true,
+                'message' => $firstError[0]
+            ]);
+            exit;
+        }
 
         // Add as system message so it appears in the right place
         $this->addSystemMessage('error', $firstError[0]);
@@ -383,23 +502,30 @@ abstract class BaseController
         $dblog_use = $this->config->get('logging', 'database_enabled');
         $session_key = $this->config->get('security', 'session_key');
 
-        if (isset($_SESSION["userid"])) {
+        if ($this->userContextService->isAuthenticated()) {
             $perm_is_godlike = UserManager::verifyPermission($this->db, 'user_is_ueberuser');
 
             $vars = array_merge($vars, [
-                'user_logged_in' => isset($_SESSION["userid"]),
+                'user_logged_in' => $this->userContextService->isAuthenticated(),
                 'perm_search' => UserManager::verifyPermission($this->db, 'search'),
                 'perm_view_zone_own' => UserManager::verifyPermission($this->db, 'zone_content_view_own'),
                 'perm_view_zone_other' => UserManager::verifyPermission($this->db, 'zone_content_view_others'),
                 'perm_supermaster_view' => UserManager::verifyPermission($this->db, 'supermaster_view'),
                 'perm_zone_master_add' => UserManager::verifyPermission($this->db, 'zone_master_add'),
                 'perm_zone_slave_add' => UserManager::verifyPermission($this->db, 'zone_slave_add'),
+                'perm_zone_templ_add' => UserManager::verifyPermission($this->db, 'zone_templ_add'),
+                'perm_zone_templ_edit' => UserManager::verifyPermission($this->db, 'zone_templ_edit'),
                 'perm_supermaster_add' => UserManager::verifyPermission($this->db, 'supermaster_add'),
                 'perm_is_godlike' => $perm_is_godlike,
                 'perm_templ_perm_edit' => UserManager::verifyPermission($this->db, 'templ_perm_edit'),
                 'perm_add_new' => UserManager::verifyPermission($this->db, 'user_add_new'),
+                'perm_view_others' => UserManager::verifyPermission($this->db, 'user_view_others'),
+                'perm_edit_own' => UserManager::verifyPermission($this->db, 'user_edit_own'),
+                'perm_edit_others' => UserManager::verifyPermission($this->db, 'user_edit_others'),
                 'session_key_error' => $perm_is_godlike && $session_key == 'p0w3r4dm1n' ? _('Default session encryption key is used, please set it in your configuration file.') : false,
-                'auth_used' => $_SESSION["auth_used"] != "ldap",
+                'auth_used' => $this->userContextService->getAuthMethod() !== "ldap",
+                'session_userid' => $this->userContextService->getLoggedInUserId() ?? 0,
+                'request' => $this->request,
                 'dblog_use' => $dblog_use,
                 'iface_add_reverse_record' => $this->config->get('interface', 'add_reverse_record', false),
                 'whois_enabled' => $this->config->get('whois', 'enabled', false),
@@ -407,7 +533,8 @@ abstract class BaseController
                 'api_enabled' => $this->config->get('api', 'enabled', false),
                 'mfa_enabled' => $this->config->get('security', 'mfa.enabled', false),
                 'whois_restrict_to_admin' => $this->config->get('whois', 'restrict_to_admin', true),
-                'rdap_restrict_to_admin' => $this->config->get('rdap', 'restrict_to_admin', true)
+                'rdap_restrict_to_admin' => $this->config->get('rdap', 'restrict_to_admin', true),
+                'enable_consistency_checks' => $this->config->get('interface', 'enable_consistency_checks', false)
             ]);
         }
 
@@ -438,7 +565,7 @@ abstract class BaseController
         $db_debug = $this->config->get('database', 'debug');
 
         $this->app->render('footer.html', [
-            'version' => isset($_SESSION["userid"]) ? Version::VERSION : false,
+            'version' => $this->userContextService->isAuthenticated() ? Version::VERSION : false,
             'custom_footer' => file_exists($this->config->get('interface', 'theme_base_path', 'templates') . '/' . $this->config->get('interface', 'theme', 'default') . '/custom/footer.html'),
             'display_stats' => $display_stats ? $this->app->displayStats() : false,
             'db_queries' => $db_debug ? $this->db->getQueries() : false,
@@ -447,8 +574,6 @@ abstract class BaseController
             'theme' => $theme,
             'theme_base_path' => $themeBasePath,
         ]);
-
-        $this->db->disconnect();
     }
 
     /**

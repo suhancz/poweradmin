@@ -68,6 +68,16 @@ return [
             'recovery_codes' => 8,               // Number of recovery codes to generate
             'recovery_code_length' => 10,        // Length of recovery codes
         ],
+        /**
+         * Google reCAPTCHA Settings
+         */
+        'recaptcha' => [
+            'enabled' => false,                  // Enable reCAPTCHA on login form
+            'site_key' => '',                    // Your reCAPTCHA site key (public key)
+            'secret_key' => '',                  // Your reCAPTCHA secret key (private key)
+            'version' => 'v3',                   // reCAPTCHA version: 'v2' or 'v3'
+            'v3_threshold' => 0.5,               // Score threshold for v3 (0.0 - 1.0)
+        ],
     ],
 
     /**
@@ -85,7 +95,7 @@ return [
 
         // UI Element Settings
         'show_record_id' => true,             // Show record ID column in edit mode (added in 3.9.0)
-        'position_record_form_top' => false,  // Position the "Add record" form at the top of the page (added in 3.9.0)
+        'position_record_form_top' => true,   // Position the "Add record" form at the top of the page (added in 3.9.0)
         'position_save_button_top' => false,  // Position the "Save changes" button at the top of the page (added in 3.9.0)
         'show_zone_comments' => true,         // Show or hide zone comments (added in 2.2.3)
         'show_record_comments' => false,      // Show or hide record comments (added in 3.9.0)
@@ -99,6 +109,8 @@ return [
         'add_reverse_record' => true,         // Enable checkbox to add PTR record from regular zone view (added in 2.1.7)
         'add_domain_record' => true,          // Enable checkbox to add A/AAAA record from reverse zone view
         'show_migrations' => false,           // Show migrations menu item (experimental)
+        'display_hostname_only' => false,     // Display only hostname part in zone edit form (strips zone suffix) (added in 4.0.0)
+        'enable_consistency_checks' => false, // Enable database consistency checks page (added in 4.0.0)
     ],
 
     /**
@@ -125,6 +137,7 @@ return [
         'top_level_tld_check' => false,            // Prevent creation of top-level domains (added in 2.1.7)
         'third_level_check' => false,              // Prevent creation of third-level domains (added in 2.1.7)
         'txt_auto_quote' => false,                 // Automatically quote TXT records (added in 3.9.2)
+        'prevent_duplicate_ptr' => true,           // Prevent creation of multiple PTR records for same IP in batch operations (added in 4.0.0)
 
         // Record Type Settings (added in 4.0.0)
         // Set to null to use all default types, or provide an array of specific types to show

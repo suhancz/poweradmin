@@ -24,18 +24,21 @@ namespace PoweradminInstall;
 
 use PDO;
 use Poweradmin\Application\Service\UserAuthenticationService;
+use Poweradmin\Domain\Service\DatabaseSchemaService;
 use Poweradmin\Infrastructure\Configuration\ConfigurationManager;
-use Poweradmin\Infrastructure\Database\PDOLayer;
+use Poweradmin\Infrastructure\Database\PDOCommon;
 
 class DatabaseHelper
 {
-    private PDOLayer $db;
+    private PDOCommon $db;
+    private DatabaseSchemaService $schemaService;
     private array $databaseCredentials;
     private const REQUIRED_PDNS_TABLES = ['domains', 'records', 'supermasters', 'domainmetadata', 'comments'];
 
-    public function __construct(PDOLayer $db, array $databaseCredentials)
+    public function __construct(PDOCommon $db, array $databaseCredentials)
     {
         $this->db = $db;
+        $this->schemaService = new DatabaseSchemaService($db);
         $this->databaseCredentials = $databaseCredentials;
     }
 
@@ -47,7 +50,7 @@ class DatabaseHelper
     public function checkPowerDnsTables(): array
     {
         $missingTables = [];
-        $existingTables = $this->db->listTables();
+        $existingTables = $this->schemaService->listTables();
 
         foreach (self::REQUIRED_PDNS_TABLES as $table) {
             if (!in_array($table, $existingTables)) {
@@ -65,47 +68,76 @@ class DatabaseHelper
             $this->verifySQLiteAccess();
         }
 
-        $current_tables = $this->db->listTables();
+        $current_tables = $this->schemaService->listTables();
         $def_tables = DatabaseStructureHelper::getDefaultTables();
 
-        foreach ($def_tables as $table) {
-            if (in_array($table['table_name'], $current_tables)) {
-                $this->db->dropTable($table['table_name']);
+        // Disable foreign key checks for the duration of this operation
+        $dbType = $this->databaseCredentials['db_type'];
+        try {
+            if ($dbType === 'mysql') {
+                $this->db->exec('SET foreign_key_checks = 0');
+            } elseif ($dbType === 'pgsql') {
+                // PostgreSQL doesn't have a direct equivalent to SET foreign_key_checks
+                // We'll handle this differently if needed
+            } elseif ($dbType === 'sqlite') {
+                $this->db->exec('PRAGMA foreign_keys = OFF');
             }
+        } catch (\Exception $e) {
+            // If we can't disable foreign key checks, we'll continue anyway
+            // and handle any errors that occur
+        }
 
-            $options = $table['options'];
-
-            if (isset($this->databaseCredentials['db_charset']) && $this->databaseCredentials['db_charset']) {
-                $options['charset'] = $this->databaseCredentials['db_charset'];
-            }
-
-            if (isset($this->databaseCredentials['db_collation']) && $this->databaseCredentials['db_collation']) {
-                $options['collation'] = $this->databaseCredentials['db_collation'];
-            }
-            $this->db->createTable($table['table_name'], $table['fields'], $options);
-
-            // Set default value for the 'type' column in user_mfa table
-            if ($table['table_name'] === 'user_mfa') {
-                $dbType = $this->databaseCredentials['db_type'];
-
-                switch ($dbType) {
-                    case 'mysql':
-                        $this->db->exec("ALTER TABLE `user_mfa` ALTER COLUMN `type` SET DEFAULT 'app'");
-                        break;
-                    case 'pgsql':
-                        $this->db->exec("ALTER TABLE user_mfa ALTER COLUMN type SET DEFAULT 'app'");
-                        break;
-                    case 'sqlite':
-                        // SQLite doesn't support ALTER COLUMN with SET DEFAULT
-                        // We'll need to ensure new rows have this value explicitly set
-                        break;
+        try {
+            foreach ($def_tables as $table) {
+                if (in_array($table['table_name'], $current_tables)) {
+                    $this->schemaService->dropTable($table['table_name']);
                 }
+
+                $options = $table['options'];
+
+                if (isset($this->databaseCredentials['db_charset']) && $this->databaseCredentials['db_charset']) {
+                    $options['charset'] = $this->databaseCredentials['db_charset'];
+                }
+
+                if (isset($this->databaseCredentials['db_collation']) && $this->databaseCredentials['db_collation']) {
+                    $options['collation'] = $this->databaseCredentials['db_collation'];
+                }
+                $this->schemaService->createTable($table['table_name'], $table['fields'], $options);
+
+                // Set default value for the 'type' column in user_mfa table
+                if ($table['table_name'] === 'user_mfa') {
+                    $dbType = $this->databaseCredentials['db_type'];
+
+                    switch ($dbType) {
+                        case 'mysql':
+                            $this->db->exec("ALTER TABLE `user_mfa` ALTER COLUMN `type` SET DEFAULT 'app'");
+                            break;
+                        case 'pgsql':
+                            $this->db->exec("ALTER TABLE user_mfa ALTER COLUMN type SET DEFAULT 'app'");
+                            break;
+                        case 'sqlite':
+                            // SQLite doesn't support ALTER COLUMN with SET DEFAULT
+                            // We'll need to ensure new rows have this value explicitly set
+                            break;
+                    }
+                }
+            }
+        } finally {
+            // Re-enable foreign key checks after we're done
+            try {
+                if ($dbType === 'mysql') {
+                    $this->db->exec('SET foreign_key_checks = 1');
+                } elseif ($dbType === 'sqlite') {
+                    $this->db->exec('PRAGMA foreign_keys = ON');
+                }
+            } catch (\Exception $e) {
+                // Ignore any errors when re-enabling foreign key checks
             }
         }
 
         $fill_perm_items = $this->db->prepare('INSERT INTO perm_items VALUES (?, ?, ?)');
         $def_permissions = PermissionHelper::getPermissionMappings();
-        $this->db->executeMultiple($fill_perm_items, $def_permissions);
+        $this->schemaService->executeMultiple($fill_perm_items, $def_permissions);
         if (method_exists($fill_perm_items, 'free')) {
             $fill_perm_items->free();
         }

@@ -45,9 +45,19 @@ class BasicRouter
     private array $pages = [];
 
     /**
-     * @var string $defaultPage The default page name.
+     * @var string|null $defaultPage The default page name.
      */
-    private string $defaultPage;
+    private ?string $defaultPage = null;
+
+    /**
+     * @var array $pathParameters Extracted path parameters from RESTful routes.
+     */
+    private array $pathParameters = [];
+
+    /**
+     * @var bool $routeFound Whether the requested route was found.
+     */
+    private bool $routeFound = true;
 
     /**
      * BasicRouter constructor.
@@ -66,14 +76,34 @@ class BasicRouter
      */
     public function getPageName(): string
     {
-        $page = $this->request['page'] ?? $this->defaultPage;
+        $page = $this->request['page'] ?? null;
+
+        // If no page is provided, go to default page
+        if ($page === null) {
+            if ($this->defaultPage !== null) {
+                $this->routeFound = true;
+                return $this->defaultPage;
+            } else {
+                // No page and no default page configured
+                throw new \Error('No page specified and no default page configured');
+            }
+        }
+
         $page = explode('?', $page)[0];
 
+        // Handle RESTful API routes
+        if (str_starts_with($page, 'api/')) {
+            return $this->processRestfulRoute($page);
+        }
+
         if (in_array($page, $this->pages)) {
+            $this->routeFound = true;
             return $page;
         }
 
-        return $this->defaultPage;
+        // Bad/wrong page provided - show 404
+        $this->routeFound = false;
+        return '404';
     }
 
     /**
@@ -131,15 +161,23 @@ class BasicRouter
         // API paths should always use controller authentication mechanisms
         // instead of relying on session-based authentication
         if (str_starts_with($pageName, 'api/')) {
-            // Force any existing login session to be ignored for API routes
-            $originalSession = $_SESSION;
-            $_SESSION = [];
+            // Internal API routes should maintain session for logged-in users
+            if (str_starts_with($pageName, 'api/internal/')) {
+                // Internal API routes use session authentication
+                $controller = new $controllerClassName($this->request);
+                $controller->run();
+            } else {
+                // Public API routes (v1, v2, etc.) should not use session
+                $originalSession = $_SESSION;
+                $_SESSION = [];
 
-            $controller = new $controllerClassName($this->request);
-            $controller->run();
+                // Pass path parameters to API controllers
+                $controller = new $controllerClassName($this->request, $this->pathParameters);
+                $controller->run();
 
-            // Restore the session after API controller is done
-            $_SESSION = $originalSession;
+                // Restore the session after API controller is done
+                $_SESSION = $originalSession;
+            }
         } else {
             // Standard controller instantiation for non-API routes
             $controller = new $controllerClassName($this->request);
@@ -167,5 +205,98 @@ class BasicRouter
     public function setDefaultPage(string $string): void
     {
         $this->defaultPage = $string;
+    }
+
+    /**
+     * Process RESTful API routes and extract path parameters
+     *
+     * @param string $path The request path
+     * @return string The processed route for controller resolution
+     */
+    private function processRestfulRoute(string $path): string
+    {
+        $parts = explode('/', $path);
+
+        // Reset path parameters for each request
+        $this->pathParameters = [];
+
+        // Handle API versioned routes (api/v1/...)
+        if (count($parts) >= 3 && $parts[0] === 'api' && preg_match('/^v\d+$/', $parts[1])) {
+            $resource = $parts[2];
+
+            // Handle .htaccess rewritten paths with underscore (e.g., api/v1/zones_records/46/123)
+            if (strpos($resource, '_') !== false) {
+                // Extract resource and sub-resource from compound name
+                $resourceParts = explode('_', $resource, 2);
+                $mainResource = $resourceParts[0];
+                $subResource = $resourceParts[1];
+
+                // Extract IDs from remaining path segments
+                if (isset($parts[3]) && is_numeric($parts[3])) {
+                    $this->pathParameters['id'] = (int)$parts[3];
+                }
+                if (isset($parts[4]) && is_numeric($parts[4])) {
+                    $this->pathParameters['sub_id'] = (int)$parts[4];
+                }
+
+                // Return path to sub-resource controller
+                return "api/{$parts[1]}/{$mainResource}_{$subResource}";
+            }
+
+            // Extract resource ID if present (e.g., api/v1/zones/123)
+            if (isset($parts[3]) && is_numeric($parts[3])) {
+                $this->pathParameters['id'] = (int)$parts[3];
+
+                // Check for sub-resources (e.g., api/v1/zones/123/records)
+                if (isset($parts[4])) {
+                    $subResource = $parts[4];
+
+                    // Extract sub-resource ID if present (e.g., api/v1/zones/123/records/456)
+                    if (isset($parts[5]) && is_numeric($parts[5])) {
+                        $this->pathParameters['sub_id'] = (int)$parts[5];
+                    }
+
+                    // Return path to sub-resource controller
+                    return "api/{$parts[1]}/{$resource}_{$subResource}";
+                }
+
+                // Return path to main resource controller
+                return "api/{$parts[1]}/{$resource}";
+            }
+
+            // Handle special endpoints (e.g., api/v1/user/verify)
+            if (isset($parts[3]) && !is_numeric($parts[3])) {
+                $action = $parts[3];
+
+                // For special endpoints, create a specific controller path
+                return "api/{$parts[1]}/{$resource}_{$action}";
+            }
+
+            // Return base resource path (e.g., api/v1/zones)
+            return "api/{$parts[1]}/{$resource}";
+        }
+
+        // Fallback to original path for non-standard API routes
+        return $path;
+    }
+
+    /**
+     * Get extracted path parameters from RESTful routes
+     *
+     * @return array The path parameters
+     */
+    public function getPathParameters(): array
+    {
+        return $this->pathParameters;
+    }
+
+    /**
+     * Check if the requested route was found
+     *
+     * @return bool Whether the route was found
+     */
+    public function isRouteFound(): bool
+    {
+        return $this->routeFound;
     }
 }

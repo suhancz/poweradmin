@@ -23,8 +23,8 @@
 namespace Poweradmin\Domain\Service\DnsValidation;
 
 use Poweradmin\Domain\Service\Validation\ValidationResult;
-use Poweradmin\Infrastructure\Configuration\ConfigurationManager;
-use Poweradmin\Infrastructure\Database\PDOLayer;
+use Poweradmin\Infrastructure\Configuration\ConfigurationInterface;
+use Poweradmin\Infrastructure\Database\PDOCommon;
 use Poweradmin\Infrastructure\Service\MessageService;
 
 /**
@@ -37,11 +37,11 @@ use Poweradmin\Infrastructure\Service\MessageService;
  */
 class DnsCommonValidator
 {
-    private PDOLayer $db;
-    private ConfigurationManager $config;
+    private PDOCommon $db;
+    private ConfigurationInterface $config;
     private MessageService $messageService;
 
-    public function __construct(PDOLayer $db, ConfigurationManager $config)
+    public function __construct(PDOCommon $db, ConfigurationInterface $config)
     {
         $this->db = $db;
         $this->config = $config;
@@ -92,11 +92,10 @@ class DnsCommonValidator
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
 
-        $query = "SELECT id FROM $records_table
-				WHERE name = " . $this->db->quote($target, 'text') . "
-				AND TYPE = " . $this->db->quote('CNAME', 'text');
-
-        $response = $this->db->queryOne($query);
+        $stmt = $this->db->prepare("SELECT id FROM $records_table
+				WHERE name = ? AND TYPE = ?");
+        $stmt->execute([$target, 'CNAME']);
+        $response = $stmt->fetchColumn();
         if ($response) {
             return ValidationResult::failure(_('You can not point a NS or MX record to a CNAME record. Remove or rename the CNAME record first, or take another name.'));
         }

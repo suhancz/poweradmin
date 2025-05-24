@@ -22,13 +22,14 @@
 
 namespace Poweradmin\Domain\Repository;
 
+use Poweradmin\Domain\Model\Constants;
 use Poweradmin\Domain\Model\Permission;
 use Poweradmin\Domain\Service\DnsIdnService;
 use Poweradmin\Domain\Service\DnsValidation\HostnameValidator;
 use Poweradmin\Domain\Model\ZoneTemplate;
 use Poweradmin\Infrastructure\Configuration\ConfigurationManager;
 use Poweradmin\Infrastructure\Database\DbCompat;
-use Poweradmin\Infrastructure\Database\PDOLayer;
+use Poweradmin\Infrastructure\Database\PDOCommon;
 use Poweradmin\Infrastructure\Service\MessageService;
 use Poweradmin\Infrastructure\Utility\SortHelper;
 
@@ -37,7 +38,8 @@ use Poweradmin\Infrastructure\Utility\SortHelper;
  */
 class DomainRepository implements DomainRepositoryInterface
 {
-    private PDOLayer $db;
+
+    private PDOCommon $db;
     private ConfigurationManager $config;
     private MessageService $messageService;
     private HostnameValidator $hostnameValidator;
@@ -45,10 +47,10 @@ class DomainRepository implements DomainRepositoryInterface
     /**
      * Constructor
      *
-     * @param PDOLayer $db Database connection
+     * @param PDOCommon $db Database connection
      * @param ConfigurationManager $config Configuration manager
      */
-    public function __construct(PDOLayer $db, ConfigurationManager $config)
+    public function __construct(PDOCommon $db, ConfigurationManager $config)
     {
         $this->db = $db;
         $this->config = $config;
@@ -68,8 +70,9 @@ class DomainRepository implements DomainRepositoryInterface
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $domains_table = $pdns_db_name ? $pdns_db_name . '.domains' : 'domains';
 
-        $query = "SELECT COUNT(id) FROM $domains_table WHERE id = " . $this->db->quote($zid, 'integer');
-        return $this->db->queryOne($query);
+        $stmt = $this->db->prepare("SELECT COUNT(id) FROM $domains_table WHERE id = :id");
+        $stmt->execute([':id' => $zid]);
+        return $stmt->fetchColumn();
     }
 
     /**
@@ -77,19 +80,20 @@ class DomainRepository implements DomainRepositoryInterface
      *
      * @param int $id Domain ID
      *
-     * @return bool|string Domain name
+     * @return string|null Domain name or null if not found
      */
-    public function getDomainNameById(int $id): bool|string
+    public function getDomainNameById(int $id): ?string
     {
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $domains_table = $pdns_db_name ? $pdns_db_name . '.domains' : 'domains';
 
-        $result = $this->db->queryRow("SELECT name FROM $domains_table WHERE id=" . $this->db->quote($id, 'integer'));
+        $stmt = $this->db->prepare("SELECT name FROM $domains_table WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $result = $stmt->fetch();
         if ($result) {
             return $result["name"];
         } else {
-            $this->messageService->addSystemError("Domain does not exist.");
-            return false;
+            return null;
         }
     }
 
@@ -98,12 +102,12 @@ class DomainRepository implements DomainRepositoryInterface
      *
      * @param string $name Domain name
      *
-     * @return bool|int Domain ID or false if not found
+     * @return int|null Domain ID or null if not found
      */
-    public function getDomainIdByName(string $name): bool|int
+    public function getDomainIdByName(string $name): ?int
     {
         if (empty($name)) {
-            return false;
+            return null;
         }
 
         $pdns_db_name = $this->config->get('database', 'pdns_name');
@@ -115,32 +119,29 @@ class DomainRepository implements DomainRepositoryInterface
         $stmt->execute();
 
         $result = $stmt->fetch(\PDO::FETCH_ASSOC);
-        return $result ? $result['id'] : false;
+        return $result ? (int)$result['id'] : null;
     }
 
     /**
      * Get zone id from name
      *
      * @param string $zname Zone name
-     * @return bool|int Zone ID
+     * @return int|null Zone ID or null if not found
      */
-    public function getZoneIdFromName(string $zname): bool|int
+    public function getZoneIdFromName(string $zname): ?int
     {
-        if (!empty($zname)) {
-            $pdns_db_name = $this->config->get('database', 'pdns_name');
-            $domains_table = $pdns_db_name ? $pdns_db_name . '.domains' : 'domains';
-
-            $result = $this->db->queryRow("SELECT id FROM $domains_table WHERE name=" . $this->db->quote($zname, 'text'));
-            if ($result) {
-                return $result["id"];
-            } else {
-                $this->messageService->addSystemError("Zone does not exist.");
-                return false;
-            }
-        } else {
-            $this->messageService->addSystemError(sprintf(_('Invalid argument(s) given to function %s %s'), "getZoneIdFromName", "Not a valid domainname: $zname"));
-            return false;
+        if (empty($zname)) {
+            return null;
         }
+
+        $pdns_db_name = $this->config->get('database', 'pdns_name');
+        $domains_table = $pdns_db_name ? $pdns_db_name . '.domains' : 'domains';
+
+        $stmt = $this->db->prepare("SELECT id FROM $domains_table WHERE name = :name");
+        $stmt->execute([':name' => $zname]);
+        $result = $stmt->fetch();
+
+        return $result ? (int)$result["id"] : null;
     }
 
     /**
@@ -155,7 +156,9 @@ class DomainRepository implements DomainRepositoryInterface
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $domains_table = $pdns_db_name ? $pdns_db_name . '.domains' : 'domains';
 
-        $type = $this->db->queryOne("SELECT type FROM $domains_table WHERE id = " . $this->db->quote($id, 'integer'));
+        $stmt = $this->db->prepare("SELECT type FROM $domains_table WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $type = $stmt->fetchColumn();
         if ($type == "") {
             $type = "NATIVE";
         }
@@ -167,14 +170,17 @@ class DomainRepository implements DomainRepositoryInterface
      *
      * @param int $id Domain ID
      *
-     * @return string|bool|null Master server
+     * @return string|null Master server or null if not found
      */
-    public function getDomainSlaveMaster(int $id): string|bool|null
+    public function getDomainSlaveMaster(int $id): ?string
     {
         $pdns_db_name = $this->config->get('database', 'pdns_name');
         $domains_table = $pdns_db_name ? $pdns_db_name . '.domains' : 'domains';
 
-        return $this->db->queryOne("SELECT master FROM $domains_table WHERE type = 'SLAVE' and id = " . $this->db->quote($id, 'integer'));
+        $stmt = $this->db->prepare("SELECT master FROM $domains_table WHERE type = 'SLAVE' and id = :id");
+        $stmt->execute([':id' => $id]);
+        $result = $stmt->fetchColumn();
+        return $result !== false ? $result : null;
     }
 
     /**
@@ -189,7 +195,9 @@ class DomainRepository implements DomainRepositoryInterface
         $domains_table = $pdns_db_name ? $pdns_db_name . '.domains' : 'domains';
 
         if ($this->hostnameValidator->isValid($domain)) {
-            $result = $this->db->queryRow("SELECT id FROM $domains_table WHERE name=" . $this->db->quote($domain, 'text'));
+            $stmt = $this->db->prepare("SELECT id FROM $domains_table WHERE name = :name");
+            $stmt->execute([':name' => $domain]);
+            $result = $stmt->fetch();
             return (bool)$result;
         } else {
             $this->messageService->addSystemError(_('This is an invalid zone name.'));
@@ -204,13 +212,13 @@ class DomainRepository implements DomainRepositoryInterface
      * @param int $userid Requesting User ID
      * @param string $letterstart Starting letters to match [default='all']
      * @param int $rowstart Start from row in set [default=0]
-     * @param int $rowamount Max number of rows to fetch for this query when not 'all' [default=999999]
+     * @param int $rowamount Max number of rows to fetch for this query when not 'all' [default=9999]
      * @param string $sortby Column to sort results by [default='name']
      * @param string $sortDirection Sort direction [default='ASC']
      *
-     * @return boolean|array false or array of zone details [id,name,type,count_records]
+     * @return array array of zone details [id,name,type,count_records] (empty array if none found)
      */
-    public function getZones(string $perm, int $userid = 0, string $letterstart = 'all', int $rowstart = 0, int $rowamount = 999999, string $sortby = 'name', string $sortDirection = 'ASC'): bool|array
+    public function getZones(string $perm, int $userid = 0, string $letterstart = 'all', int $rowstart = 0, int $rowamount = Constants::DEFAULT_MAX_ROWS, string $sortby = 'name', string $sortDirection = 'ASC'): array
     {
         $db_type = $this->config->get('database', 'type');
         $pdnssec_use = $this->config->get('dnssec', 'enabled');
@@ -230,16 +238,17 @@ class DomainRepository implements DomainRepositoryInterface
 
         $sql_add = '';
         if ($perm != "own" && $perm != "all") {
-            $this->messageService->addSystemError(_("You do not have the permission to view this zone."));
-
-            return false;
+            return [];
         } else {
+            $params = [];
             if ($perm == "own") {
-                $sql_add = " AND zones.domain_id = $domains_table.id AND zones.owner = " . $this->db->quote($userid, 'integer');
+                $sql_add = " AND zones.domain_id = $domains_table.id AND zones.owner = :userid";
+                $params[':userid'] = $userid;
             }
 
             if ($letterstart != 'all' && $letterstart != 1) {
-                $sql_add .= " AND " . DbCompat::substr($db_type) . "($domains_table.name,1,1) = " . $this->db->quote($letterstart, 'text') . " ";
+                $sql_add .= " AND " . DbCompat::substr($db_type) . "($domains_table.name,1,1) = :letterstart ";
+                $params[':letterstart'] = $letterstart;
             } elseif ($letterstart == 1) {
                 $sql_add .= " AND " . DbCompat::substr($db_type) . "($domains_table.name,1,1) " . DbCompat::regexp($db_type) . " '[0-9]'";
             }
@@ -278,11 +287,20 @@ class DomainRepository implements DomainRepositoryInterface
                     " . ($iface_zone_comments ? ", zones.comment" : "") . "
                     ORDER BY " . $sql_sortby;
 
-        if ($letterstart != 'all') {
-            $this->db->setLimit($rowamount, $rowstart);
+        if ($letterstart != 'all' && $rowamount < Constants::DEFAULT_MAX_ROWS) {
+            $query .= " LIMIT " . $rowamount;
+            if ($rowstart > 0) {
+                $query .= " OFFSET " . $rowstart;
+            }
         }
-        $result = $this->db->query($query);
-        $this->db->setLimit(0);
+
+        if (!empty($params)) {
+            $stmt = $this->db->prepare($query);
+            $stmt->execute($params);
+            $result = $stmt;
+        } else {
+            $result = $this->db->query($query);
+        }
 
         $ret = array();
         while ($r = $result->fetch()) {
@@ -336,14 +354,15 @@ class DomainRepository implements DomainRepositoryInterface
             $domains_table = $pdns_db_name ? $pdns_db_name . '.domains' : 'domains';
             $records_table = $pdns_db_name ? $pdns_db_name . '.records' : 'records';
 
-            $query = "SELECT $domains_table.type AS type,
+            $stmt = $this->db->prepare("SELECT $domains_table.type AS type,
                     $domains_table.name AS name,
                     $domains_table.master AS master_ip,
                     count($records_table.domain_id) AS record_count
                     FROM $domains_table LEFT OUTER JOIN $records_table ON $domains_table.id = $records_table.domain_id
-                    WHERE $domains_table.id = " . $this->db->quote($zid, 'integer') . "
-                    GROUP BY $domains_table.id, $domains_table.type, $domains_table.name, $domains_table.master";
-            $result = $this->db->queryRow($query);
+                    WHERE $domains_table.id = :zid
+                    GROUP BY $domains_table.id, $domains_table.type, $domains_table.name, $domains_table.master");
+            $stmt->execute([':zid' => $zid]);
+            $result = $stmt->fetch();
             return array(
                 "id" => $zid,
                 "name" => $result['name'],
@@ -390,11 +409,11 @@ class DomainRepository implements DomainRepositoryInterface
         $domains_table = $pdns_db_name ? $pdns_db_name . '.domains' : 'domains';
 
         // get all reverse-zones
-        $query = "SELECT name, id FROM $domains_table
-                   WHERE name like " . $this->db->quote('%.arpa', 'text') . "
-                   ORDER BY length(name) DESC";
-
-        $response = $this->db->query($query);
+        $stmt = $this->db->prepare("SELECT name, id FROM $domains_table
+                   WHERE name like :pattern
+                   ORDER BY length(name) DESC");
+        $stmt->execute([':pattern' => '%.arpa']);
+        $response = $stmt;
         if ($response) {
             while ($r = $response->fetch()) {
                 $pos = stripos($domain, $r["name"]);
